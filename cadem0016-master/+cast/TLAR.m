@@ -36,7 +36,7 @@ classdef TLAR
             obj.Alt_max = 39e3./SI.ft; %m (39,000ft)
             obj.Alt_cruise = 31e3./SI.ft;
             obj.Crew = 4;
-            obj.Payload = 103700;
+            obj.Payload
             obj.CrewMass = (80+10)*obj.Crew;
             obj.V_app = 200./SI.knt;
             obj.V_ld = 150./SI.knt;

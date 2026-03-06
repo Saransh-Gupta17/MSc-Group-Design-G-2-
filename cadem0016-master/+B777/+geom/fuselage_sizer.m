@@ -1,0 +1,98 @@
+function [L_cabin, R_cabin, L_total, D_ext, FR] = fuselage_sizer(Fleet_size, Pallet_size, L_nose, D_max)
+% FUSELAGE_SIZER
+% Calculates fuselage geometry for a manually specified pallet layout.
+%
+% OUTPUTS
+% L_cabin   = cabin/cargo length (m)
+% R_cabin   = external cabin radius (m)
+% L_total   = total fuselage length (m)
+% D_ext     = external fuselage diameter (m)
+% FR        = fineness ratio (L_total / D_ext)
+%
+% ---------------------------------------------------------
+% LAYOUT OPTIONS
+%
+% 1 = High: Single deck 2-abreast
+% 2 = High: Single deck 3-abreast
+% 3 = Low:  Twin deck 2x1
+% 4 = Low:  Twin deck 2x2
+%
+% ---------------------------------------------------------
+% ORIENTATION OPTIONS
+%
+% 1 = Normal pallet orientation (Wp , Lp)
+% 2 = Rotated pallet orientation (Lp , Wp)
+%
+% ---------------------------------------------------------
+% Example
+%
+% [L_cabin,R_cabin,L_total,D_ext,FR] = ...
+%     fuselage_sizer(3,2,5,250,6,7.5);
+%
+% ---------------------------------------------------------
+
+%% Known pallet parameters and input parameters
+layoutOption = 1;
+orientOption = 2;
+
+
+Wp = 2.435;    % pallet width (m)
+Lp = 3.175;    % pallet length (m)
+
+g_wall = 0.10; % wall clearance (m)
+g_pp   = 0.07; % pallet gap (m)
+
+t = 0.30;      % structural thickness (m)
+
+%% Layout definitions
+
+n_w_list = [2 3 2 2];           % pallets across
+lenFactorList = [2.0 3.0 2.7 3.4];
+
+%% Orientation definitions
+
+Wp_list = [Wp Lp];
+Lp_list = [Lp Wp];
+
+%% Pallets per aircraft
+
+T = Pallet_size / Fleet_size;
+
+%% Apply chosen layout
+
+n_w = n_w_list(layoutOption);
+lenFactor = lenFactorList(layoutOption);
+
+%% Apply chosen orientation
+
+Wp_use = Wp_list(orientOption);
+Lp_use = Lp_list(orientOption);
+
+%% Diameter
+
+D_int = n_w*Wp_use + (n_w-1)*g_pp + 2*g_wall;
+D_ext = D_int + 2*t;
+
+R_cabin = D_ext/2;
+
+%% Cabin length
+
+L_cabin = (T/lenFactor) * (Lp_use + g_pp);
+
+%% Nose and tail
+
+L_tail = 1.48 * D_ext;
+
+L_total = L_cabin + L_nose + L_tail;
+
+%% Fineness ratio
+
+FR = L_total / D_ext;
+
+%% Hard diameter check
+
+if D_ext > D_max
+    warning('Fuselage diameter exceeds maximum constraint.')
+end
+
+end

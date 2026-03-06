@@ -87,9 +87,8 @@ classdef ADP < handle
         CabinRadius
         CabinLength
         Fleet_size
-        Total_Payload = 736000; %kg
-        Pallet_size = 246 %Total number of pallets
-        D_max = 7.5 %Maximum allowable diameter
+        Pallet_size %Total number of pallets
+        D_
     end
 
     methods
