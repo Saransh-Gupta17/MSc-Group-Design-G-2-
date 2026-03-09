@@ -1,4 +1,4 @@
-%% Size an B777 at a Mach number of 0.84
+git %% Size an B777 at a Mach number of 0.84
 
 % Instantiate an instance of the B777 class add define some initial
 % parameters
