@@ -1,4 +1,4 @@
-git %% Size an B777 at a Mach number of 0.84
+%% Size an B777 at a Mach number of 0.84
 
 % Instantiate an instance of the B777 class add define some initial
 % parameters
@@ -7,6 +7,7 @@ ADP.TLAR = cast.TLAR.B777F(); % sets top level aircraft requirements
 ADP.TLAR.M_c = 0.84;
 ADP.Fleet_size = 7;
 ADP.TLAR.Payload = ADP.Total_Payload/ADP.Fleet_size;
+ADP.c_ac = 8.5;
 
 % --------------------- set B777 specific parameters ---------------------
 ADP.KinkPos = 10;       % spanwise position of TE kink in wing planform
@@ -22,7 +23,7 @@ ADP.HtpPos = 0.85*63.7;% normalised HTP position (% of fuselage length)
 ADP.VtpPos = 0.82*63.7;% normalised VTP position (% of fuselage length)
 
 % ------------------------- set Hyper-parameters -------------------------
-ADP.Span = 64.8;
+ADP.Span = 70.3;
 
 % -------------------------- class-I estimates ---------------------------
 % initial mission analysis to estimate MTOM
