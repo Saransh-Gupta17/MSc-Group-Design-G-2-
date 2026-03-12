@@ -20,8 +20,8 @@ b = sqrt(AR*obj.HtpArea); % calc HTP span
 c_rh = obj.HtpArea/((1+tr)/2*b); % calc HTP root chord
 
 % calc aero centre
-y_ac = fzero(@(y)trapz([0,y],interp1([0,b/2],[c_rh c_rh*tr],[0,y]))-(obj.HtpArea/4),b/4);
-obj.c_ach = interp1([0,b/2],[c_rh c_rh*tr],y_ac);
+y_ac = 0.42*(b/2);
+obj.c_ach = interp1([0 b/2]',[c_rh c_rh*tr]',y_ac);
 
 % calc coords
 ys = [-b/2 0 b/2]';
@@ -58,8 +58,8 @@ b_VT = sqrt(AR*obj.VtpArea*2)/2;
 c_rv = obj.VtpArea/(b_VT*(1+tr)/2);
 
 % calc aero centre
-y_ac = fzero(@(y)trapz([0,y],interp1([0,b_VT],[c_rv c_rv*tr],[0,y]))-(obj.VtpArea/2),b_VT/2);
-obj.c_acv = interp1([0,b_VT],[c_rv c_rv*tr],y_ac);
+y_ac = 0.42*b_VT;
+obj.c_acv = interp1([0 b_VT]',[c_rv c_rv*tr]',y_ac);
 
 % calc coords
 ys = [0 0]';
