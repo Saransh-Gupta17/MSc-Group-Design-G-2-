@@ -8,13 +8,14 @@ classdef AeroPolar
         CD0
         CDmin
         CLmin   % CL at minimum drag
-        AR = 9  % Initial guess for aspect ratio
     end
 
     methods
         function obj = AeroPolar(ADP)
             % CD0 estimate
             obj.CD0 = 0.019;
+            % Use aircraft aspect ratio from ADP
+            AR = ADP.AR;
 
 
 
@@ -23,8 +24,8 @@ classdef AeroPolar
             Q = 1.05;
             P = 0.007;
 
-            obj.e = 1 / (Q + P*pi*obj.AR);   % Oswald efficiency factor
-            obj.Beta = 1 / (pi*obj.AR*obj.e);
+            obj.e = 1 / (Q + P*pi*AR);   % Oswald efficiency factor
+            obj.Beta = 1 / (pi*AR*obj.e);
         end
 
         function CD = CD(obj,CL)
