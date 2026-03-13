@@ -25,6 +25,7 @@ L3 = b/2 - obj.KinkPos;
 
 % Initial root chord guess
 c_r_star = (S/b) / (1 + tr);
+
 c0 = (1 - (1-tr)*obj.KinkPos/(b/2)) * c_r_star;
 
 % Solve for chord using area matching
@@ -60,6 +61,9 @@ x_te = x_le + cs;
 
 % Polygon coordinates
 Xs = [x_le ys; flipud(x_te) flipud(ys)];
+
+% Move wing to correct aircraft x-location
+Xs(:,1) = Xs(:,1) + obj.WingPos;
 
 % Geometry object
 GeomObj = cast.GeomObj(Name="Wing", Xs=Xs);
