@@ -21,7 +21,7 @@ c_rh = obj.HtpArea/((1+tr)/2*b); % calc HTP root chord
 
 % calc aero centre
 y_ac = 0.42*(b/2);
-obj.c_ach = interp1([0 b/2]',[c_rh c_rh*tr]',y_ac);
+obj.c_ach = interp1([0 b/2],[c_rh c_rh*tr],y_ac);
 
 % calc coords
 ys = [-b/2 0 b/2]';

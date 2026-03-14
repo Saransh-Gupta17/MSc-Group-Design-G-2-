@@ -1,107 +1,160 @@
 clear; clc; close all
 
-%% INPUT PARAMETERS
+%% ==================================
+% Aircraft Inputs
+%% ==================================
 
-span_baseline = 64.8;
-span_folding  = 70.3;
+span = 70.3;          % wingspan (m)
+S    = 489;           % wing area (m^2)
+MTOM = 374000;        % kg
 
-MTOM = 374000;
 g = 9.81;
-n = 2.5;
 
-wing_area = 599.8;
+%% ==================================
+% Load cases
+%% ==================================
 
-% Assume mean aerodynamic chord approximation
-c_mean = wing_area / span_baseline;
+n_cases = [2.5 2.0 2.3]; % manoeuvre, landing, gust
 
-% Distance between CP and shear centre
-d_cp_sc = 0.1 * c_mean;
+W = MTOM*g;
+L_cases = n_cases * W;
 
-N = 200;
+%% ==================================
+% Span discretisation
+%% ==================================
 
-%% TOTAL LOAD
+N = 400;
+y = linspace(0,span/2,N);
 
-W = MTOM * g;
-L_total = n * W;
+%% ==================================
+% Bending moments for each case
+%% ==================================
 
-%% BASELINE
+M_roots = zeros(size(L_cases));
 
-[y_b,q_b,V_b,M_b,T_b,Mroot_baseline] = wing_beam(span_baseline,L_total,N,d_cp_sc);
+for i = 1:length(L_cases)
 
-%% FOLDING
+    q0 = (4*L_cases(i))/(pi*span);
+    q  = q0*sqrt(1-(2*y/span).^2);
 
-[y_f,q_f,V_f,M_f,T_f,Mroot_folding] = wing_beam(span_folding,L_total,N,d_cp_sc);
+    V = cumtrapz(flip(y),flip(q));
+    V = flip(V);
 
-%% PRINT RESULTS
+    M = cumtrapz(flip(y),flip(V));
+    M = flip(M);
 
-fprintf('Root bending moment baseline: %.2f MNm\n',Mroot_baseline/1e6)
-fprintf('Root bending moment folding : %.2f MNm\n',Mroot_folding/1e6)
-
-fprintf('Increase due to folding: %.1f %%\n', ...
-((Mroot_folding-Mroot_baseline)/Mroot_baseline)*100)
-
-%% LIFT DISTRIBUTION PLOT
-
-figure
-plot(y_b,q_b/1000,'LineWidth',2)
-title('Lift Distribution (Baseline)')
-xlabel('Spanwise Location (m)')
-ylabel('Lift per unit span (kN/m)')
-grid on
-
-%% TORQUE DISTRIBUTION
-
-figure
-plot(y_b,T_b/1000,'LineWidth',2)
-title('Torque Distribution (Baseline)')
-xlabel('Spanwise Location (m)')
-ylabel('Torque (kNm)')
-grid on
-
-%% BENDING MOMENT PLOTS
-
-figure
-plot(y_b,M_b/1e6,'LineWidth',2)
-title('Baseline Bending Moment')
-xlabel('Spanwise Location (m)')
-ylabel('Moment (MNm)')
-grid on
-
-figure
-plot(y_f,M_f/1e6,'LineWidth',2)
-title('Folding Bending Moment')
-xlabel('Spanwise Location (m)')
-ylabel('Moment (MNm)')
-grid on
-
-%% ===============================
-% FUNCTION MUST BE AT END
-%% ===============================
-
-function [y,q,V,M,T,M_root] = wing_beam(span,L_total,N,d_cp_sc)
-
-b = span;
-
-% span stations
-y = linspace(0,b/2,N);
-
-% elliptical lift distribution
-q0 = (4*L_total)/(pi*b);
-q = q0 * sqrt(1 - (2*y/b).^2);
-
-% Shear force
-V = cumtrapz(flip(y), flip(q));
-V = flip(V);
-
-% Bending moment
-M = cumtrapz(flip(y), flip(V));
-M = flip(M);
-
-% Torque distribution
-% T = Lift per unit span * moment arm
-T = q * d_cp_sc;
-
-% Root bending moment
-M_root = M(1);
+    M_roots(i) = M(1);
 
 end
+
+M_design = max(M_roots);
+
+fprintf("Design bending moment: %.2f MNm\n",M_design/1e6)
+
+%% ==================================
+% Wing geometry
+%% ==================================
+
+lambda = 0.3;                    % taper ratio
+c_root = 2*S/(span*(1+lambda));  % root chord
+
+box_height = 0.12*c_root;        % wing box height
+flange_width = 0.4*c_root;       % effective bending flange
+
+fprintf("Root chord: %.2f m\n",c_root)
+fprintf("Wing box height: %.2f m\n",box_height)
+
+%% ==================================
+% Material
+%% ==================================
+
+sigma_allow = 250e6;   % Pa
+rho_al = 2800;         % kg/m3
+
+%% ==================================
+% Section modulus requirement
+%% ==================================
+
+Z_req = M_design / sigma_allow;
+
+%% ==================================
+% Root skin thickness
+%% ==================================
+
+A_skin_root = (2*Z_req)/box_height;
+t_root = A_skin_root/(2*flange_width);
+
+fprintf("Root skin thickness: %.1f mm\n",t_root*1000)
+
+%% ==================================
+% Spanwise thickness distribution
+%% ==================================
+
+t_span = t_root * sqrt(1-(2*y/span).^2);
+
+%% ==================================
+% Skin volume (integrated)
+%% ==================================
+
+skin_volume = 2 * trapz(y, flange_width .* t_span);
+
+%% ==================================
+% Spar volume (tapering)
+%% ==================================
+
+t_spar_root = 0.02;    % 20 mm
+t_spar_tip  = 0.005;   % 5 mm
+
+t_spar_span = linspace(t_spar_root,t_spar_tip,N);
+
+spar_volume = 2 * trapz(y, box_height .* t_spar_span);
+
+%% ==================================
+% Rib estimation
+%% ==================================
+
+rib_spacing = 0.6;
+n_ribs = span / rib_spacing;
+
+rib_area = flange_width * box_height;
+rib_volume = n_ribs * rib_area * 0.0015;  % light truss ribs
+
+%% ==================================
+% Structural volume
+%% ==================================
+
+structure_volume = skin_volume + spar_volume + rib_volume;
+
+structure_mass = rho_al * structure_volume;
+
+%% ==================================
+% Control surfaces
+%% ==================================
+
+control_surface_mass = 0.05 * structure_mass;
+
+wing_mass = structure_mass + control_surface_mass;
+
+fprintf("Wing structural mass: %.1f tonnes\n",wing_mass/1000)
+
+%% ==================================
+% Plot load cases
+%% ==================================
+
+figure
+bar(M_roots/1e6)
+xticklabels(["Manoeuvre","Landing","Gust"])
+ylabel("Root Bending Moment (MNm)")
+title("Wing Load Cases")
+grid on
+
+%% ==================================
+% Plot thickness distribution
+%% ==================================
+
+figure
+plot(y,t_span*1000,'LineWidth',2)
+xlabel("Spanwise location (m)")
+ylabel("Skin thickness (mm)")
+title("Spanwise Skin Thickness Distribution")
+grid on

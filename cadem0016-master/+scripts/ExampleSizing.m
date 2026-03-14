@@ -9,7 +9,7 @@ ADP.TLAR = cast.TLAR.B777F(); % sets top level aircraft requirements
 ADP.TLAR.M_c = 0.84;
 ADP.Fleet_size = 5;
 ADP.TLAR.Payload = ADP.Total_Payload/ADP.Fleet_size;
-ADP.c_ac = 8.5;
+
 ADP.AR = 9.5;
 
 %% --------------------- set Geometric parameters ---------------------

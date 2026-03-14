@@ -18,6 +18,7 @@ classdef ADP < handle
         Mf_Fuel % fuel mass fraction 
         Mf_TOC  % "top of climb" mass fraction
         Mf_res  % "Resevre Fuel" mass fraction
+           
     end
     % constraint Paramters
     properties
