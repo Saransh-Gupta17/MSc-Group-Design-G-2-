@@ -32,6 +32,17 @@ c = fminsearch(@(x)(get_areas(x,L2,L3,R_f,tr,SweepQtrChord) - S).^2, c0);
 [~, c_t, c_r, A1, A2, A3] = get_areas(c,L2,L3,R_f,tr,SweepQtrChord);
 
 %% ============================================================
+%                 MEAN AERODYNAMIC CHORD
+% =============================================================
+
+lambda = tr;
+
+c_mac = (2/3) * c_r * (1 + lambda + lambda^2) / (1 + lambda);
+
+% store in aircraft design parameters
+obj.c_ac = c_mac;
+
+%% ============================================================
 %                 PLANFORM POINTS
 % =============================================================
 
@@ -54,6 +65,9 @@ x_le = x_le - 0.25*c_r;
 x_te = x_le + cs;
 
 Xs = [x_le ys; flipud(x_te) flipud(ys)];
+
+% shift wing along fuselage
+Xs(:,1) = Xs(:,1) + obj.WingPos;
 
 GeomObj = cast.GeomObj(Name="Wing", Xs=Xs);
 
