@@ -1,56 +1,41 @@
 function [GeomObj, massObj] = wing(obj)
-% wing.m
-% Class I wing geometry + mass model (Raymer-based)
-% Supports baseline and folding-wing configurations
-%
-% Baseline: pure Raymer Class I
-% Folding : first-order span + hinge mass penalties
 
 %% ============================================================
 %                 PLANFORM GEOMETRY
-% =============================================================
+%% ============================================================
 
-% Quarter-chord sweep estimate (transonic transport)
 SweepQtrChord = real(acosd(0.75 .* obj.Mstar ./ obj.TLAR.M_c));
 
-% Empirical taper ratio (Raymer-style)
 tr = -0.0083 * SweepQtrChord + 0.4597;
 
-b = obj.Span;
+span = obj.Span;
+
+% Compute wing area from loading
 S = (obj.MTOM * 9.81) / obj.WingLoading;
+obj.WingArea = S;
 
 R_f = obj.CabinRadius;
-L2 = obj.KinkPos - R_f;       % fuselage to kink
-L3 = b/2 - obj.KinkPos;       % kink to tip
+L2 = obj.KinkPos - R_f;
+L3 = span/2 - obj.KinkPos;
 
-% Initial chord guess
-c_r_star = (S/b) / (1 + tr);
-c0 = (1 - (1-tr)*obj.KinkPos/(b/2)) * c_r_star;
+c_r_star = (S/span) / (1 + tr);
+c0 = (1 - (1-tr)*obj.KinkPos/(span/2)) * c_r_star;
 
-% Solve for chord that gives correct area
 c = fminsearch(@(x)(get_areas(x,L2,L3,R_f,tr,SweepQtrChord) - S).^2, c0);
-[~, c_t, c_r, A1, A2, A3] = get_areas(c,L2,L3,R_f,tr,SweepQtrChord);
+[~, c_t, c_r] = get_areas(c,L2,L3,R_f,tr,SweepQtrChord);
 
-%% ============================================================
-%                 MEAN AERODYNAMIC CHORD
-% =============================================================
-
-lambda = tr;
-
-c_mac = (2/3) * c_r * (1 + lambda + lambda^2) / (1 + lambda);
-
-% store in aircraft design parameters
+% MAC
+c_mac = (2/3) * c_r * (1 + tr + tr^2) / (1 + tr);
 obj.c_ac = c_mac;
 
 %% ============================================================
-%                 PLANFORM POINTS
-% =============================================================
+%                 GEOMETRY POINTS
+%% ============================================================
 
-ys = [-b/2 -obj.KinkPos -R_f 0 R_f obj.KinkPos b/2]';
+ys = [-span/2 -obj.KinkPos -R_f 0 R_f obj.KinkPos span/2]';
 cs = [c_t c c_r c_r c_r c c_t]';
 
-sweepLE   = atand((tand(SweepQtrChord)*L3 + c/4 - c_t/4)/L3);
-sweepHalf = atand((tand(SweepQtrChord)*L3 - c/4 + c_t/4)/L3);
+sweepLE = atand((tand(SweepQtrChord)*L3 + c/4 - c_t/4)/L3);
 
 x_le = [ ...
     tand(sweepLE)*(L2+L3)
@@ -65,57 +50,115 @@ x_le = x_le - 0.25*c_r;
 x_te = x_le + cs;
 
 Xs = [x_le ys; flipud(x_te) flipud(ys)];
-
-% shift wing along fuselage
 Xs(:,1) = Xs(:,1) + obj.WingPos;
 
 GeomObj = cast.GeomObj(Name="Wing", Xs=Xs);
 
 %% ============================================================
-%                 CLASS I WING MASS (RAYMER)
-% =============================================================
-
-b_w = obj.Span * SI.ft;               % span [ft]
-S_w = obj.WingArea * SI.ft^2;         % area [ft^2]
-t_w = 0.15 * c_r * SI.ft;             % max thickness at root [ft]
-
-% IMPORTANT: use half-chord sweep (matches reference code)
-cosLambda = cosd(sweepHalf);
-
-% Design gross weight [lb]
-Wdg_lb = obj.MTOM * obj.Mf_TOC * SI.lb;
-
-% Ultimate load factor
-n_z = 2.5 * 1.5;
-
-% Raymer wing weight [lb]
-w_wing = 0.00125 * Wdg_lb * (b_w/cosLambda)^0.75 * ...
-    (1 + sqrt(6.3*cosLambda/b_w)) * n_z^0.55 * ...
-    (b_w*S_w/(t_w*Wdg_lb*cosLambda))^0.3;
-
-% Baseline wing mass [kg]
-m_wing_base = w_wing / SI.lb;
-
+%                 CLASS II.5 STRUCTURAL MODEL
 %% ============================================================
-%                 FOLDING-WING CORRECTION (CLASS I)
-% =============================================================
 
-m_wing = m_wing_base;
+g = 9.81;
+MTOM = obj.MTOM;
 
-if isfield(obj,'WingConfig') && obj.WingConfig == "folding"
+engine_mass = 0.023 * MTOM;
+engine_pos  = 0.4 * span/2;
 
-    % k_span  : global bending-induced mass increase
-    % k_hinge : local hinge + reinforcement mass
-    m_wing = m_wing_base * (1 + obj.k_span + obj.k_hinge);
+n_cases = [2.5 2.0 2.3];
+
+N = 400;
+y = linspace(0,span/2,N);
+
+% Initial guess
+wing_mass = 0.12 * MTOM;
+
+for iter = 1:5
+
+    M_roots = zeros(size(n_cases));
+
+    for i = 1:length(n_cases)
+
+        % ✅ Correct lift equilibrium
+        L = n_cases(i) * (MTOM - wing_mass - engine_mass) * g;
+
+        % Elliptical lift
+        q0 = (4*L)/(pi*span);
+        q  = q0 * sqrt(1-(2*y/span).^2);
+
+        % Wing weight
+        w_wing = (wing_mass * g)/(span/2);
+        q = q - w_wing;
+
+        % Engine load
+        F_engine = n_cases(i) * engine_mass * g;
+        [~,idx] = min(abs(y-engine_pos));
+
+        % Shear
+        V = cumtrapz(flip(y),flip(q));
+        V = flip(V);
+        V(idx:end) = V(idx:end) - F_engine;
+
+        % Bending moment
+        M = cumtrapz(flip(y),flip(V));
+        M = flip(M);
+
+        M_roots(i) = M(1);
+    end
+
+    M_design = max(M_roots);
+
+    %% STRUCTURAL SIZING
+
+    c_root = 2*obj.WingArea/(span*(1+tr));
+
+    box_height   = 0.12*c_root;
+    flange_width = 0.4*c_root;
+
+    sigma_allow = 250e6;
+    rho = 2800;
+
+    Z_req = M_design / sigma_allow;
+
+    A_skin_root = (2*Z_req)/box_height;
+    t_root = A_skin_root/(2*flange_width);
+
+    t_span = t_root * sqrt(1-(2*y/span).^2);
+
+    skin_volume = 2 * trapz(y, flange_width .* t_span);
+
+    t_spar_root = 0.02*c_root;
+    t_spar_tip  = 0.005*c_root;
+
+    t_spar_span = linspace(t_spar_root,t_spar_tip,N);
+    spar_volume = 2 * trapz(y, box_height .* t_spar_span);
+
+    rib_spacing = 0.6;
+    n_ribs = span / rib_spacing;
+
+    rib_area = flange_width * box_height;
+    rib_volume = n_ribs * rib_area * 0.0015;
+
+    structure_volume = skin_volume + spar_volume + rib_volume;
+    structure_mass = rho * structure_volume;
+
+    control_surface_mass = 0.05 * structure_mass;
+
+    new_wing_mass = structure_mass + control_surface_mass;
+
+    wing_mass = 0.5 * wing_mass + 0.5 * new_wing_mass;
 
 end
 
+m_wing = wing_mass;
+
+fprintf("DEBUG Final wing mass: %.2f tonnes\n", m_wing/1000);
+
 %% ============================================================
 %                 MASS OBJECT
-% =============================================================
+%% ============================================================
 
 massObj = cast.MassObj( ...
-    Name = "Wing", ...
+    Name = "Wing_Structural", ...
     m    = m_wing, ...
     X    = [obj.WingPos; 0] );
 
@@ -123,7 +166,7 @@ end
 
 %% ============================================================
 %                 HELPER FUNCTION
-% =============================================================
+%% ============================================================
 
 function [S,c_t,c_r,A1,A2,A3] = get_areas(c,L2,L3,R_f,tr,SweepQtrChord)
 
