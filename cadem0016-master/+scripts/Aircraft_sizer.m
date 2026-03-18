@@ -112,9 +112,20 @@ fprintf('MTOM                               : %8.1f t\n', ADP.MTOM/1e3);
 fprintf('Estimated fuel mass                : %8.1f t\n', ADP.Mf_Fuel*ADP.MTOM/1e3);
 fprintf('Block fuel per mission             : %8.1f t\n', BlockFuel/1e3);
 
-wingIdx = strcmp(d(:,1), "Wing");
+% --- DEBUG: see all wing entries ---
+wingIdxAll = contains(d(:,1), "Wing");
+
+disp("---- ALL WING ENTRIES ----")
+disp(d(wingIdxAll,:))
+
+% --- pick correct one ---
+wingIdx = strcmp(d(:,1), "Wing_Structural");
+
 if any(wingIdx)
-    fprintf('Wing mass                          : %8.1f t\n', double(d{wingIdx,2})/1e3);
+    wing_mass = str2double(d{wingIdx,2});
+    fprintf('Wing mass                          : %8.1f t\n', wing_mass);
+else
+    warning("Wing_Structural not found!")
 end
 
 fprintf('\n--- Aerodynamics -------------------------------------------\n');
