@@ -9,6 +9,7 @@ while delta > 1
     B777.ConstraintAnalysis(ADP);
     
     % build geometry
+    
     [~,B7Mass] = B777.BuildGeometry(ADP);
     
     % update Aero
@@ -29,7 +30,9 @@ while delta > 1
     ADP.OEM = sum([B7Mass(~idx).m]);
     
     % estimate MTOM
-    mtom = sum([B7Mass(1:end-2).m]) + ADP.TLAR.Payload + BlockFuel;
+    idxFuelPayload = contains([B7Mass.Name],"Fuel","IgnoreCase",true) | ...
+                 contains([B7Mass.Name],"Payload","IgnoreCase",true);
+    mtom = sum([B7Mass(1:end-2).m])+ADP.TLAR.Payload+BlockFuel;
     delta = abs(ADP.MTOM - mtom);
     ADP.MTOM = mtom;
 
