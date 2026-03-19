@@ -1,92 +1,184 @@
-function [GeomObj,massObj] = wing(obj)
-% empenage - This function builds the wing for a B777 like aircraft
+function [GeomObj, massObj] = wing(obj)
 
+%% ============================================================
+%                 PLANFORM GEOMETRY
+%% ============================================================
 
-%% Calculate wing planform parameters
-SweepQtrChord = real(acosd(0.75.*obj.Mstar./obj.TLAR.M_c)); % quarter chord sweep angle
-tr =  -0.0083*SweepQtrChord + 0.4597; % taper ratio of outer portion of the wing
+SweepQtrChord = real(acosd(0.75 .* obj.Mstar ./ obj.TLAR.M_c));
 
-b = obj.Span;
-S = (obj.MTOM*9.81)/obj.WingLoading;
+tr = -0.0083 * SweepQtrChord + 0.4597;
 
-R_f = obj.CabinRadius;        % radius of fuselage
-L2 = obj.KinkPos-R_f;   % length from fuselage to kink
-L3 =  obj.Span/2-obj.KinkPos;  % length from kink to wingtip
+span = obj.Span;
 
-% estimate chord at kink
-c_r_star  = (S/b)/(1 + tr); % root chord if constant taper
-c = (1-(1-tr)*obj.KinkPos/(b/2))*c_r_star; % estimate chord at kink pos
+% Compute wing area from loading
+S = (obj.MTOM * 9.81) / obj.WingLoading;
+obj.WingArea = S;
 
-% find chord at the kink which gives the correct wing area
-% Note - look at "get_areas" function at the bottum of script which
-% parameterises the planform 
-c = fminsearch(@(x)(get_areas(x,L2,L3,R_f,tr,SweepQtrChord)-S).^2,c);
-[~,c_t,c_r,A1,A2,A3] = get_areas(c,L2,L3,R_f,tr,SweepQtrChord);
+R_f = obj.CabinRadius;
+L2 = obj.KinkPos - R_f;
+L3 = span/2 - obj.KinkPos;
 
-%% create wing planfrom
-% Create straight leading edge based on quarter chord sweep
-ys = [-b/2 -obj.KinkPos -R_f 0 R_f obj.KinkPos b/2]';
-cs = [c_t,c,c_r,c_r,c_r,c,c_t]';
- 
-sweepLE = atand((tand(SweepQtrChord)*L3+c/4-c_t/4)/L3);
-sweepHalf = atand((tand(SweepQtrChord)*L3-c/4+c_t/4)/L3);
-x_le = [tand(sweepLE)*(L2+L3) tand(sweepLE)*L2 0 0 0 tand(sweepLE)*L2 tand(sweepLE)*(L2+L3)]';
-x_le = -c_r.*0.25 + x_le;
-x_qtr = x_le + cs*0.25;
-x_te = cs + x_le;
+c_r_star = (S/span) / (1 + tr);
+c0 = (1 - (1-tr)*obj.KinkPos/(span/2)) * c_r_star;
 
-Xs = [x_le,ys;flipud(x_te),flipud(ys)];
+c = fminsearch(@(x)(get_areas(x,L2,L3,R_f,tr,SweepQtrChord) - S).^2, c0);
+[~, c_t, c_r] = get_areas(c,L2,L3,R_f,tr,SweepQtrChord);
 
-% calc mean aero chord  (this is a crude approximation) you can do better!
-As = [A3,A2,A1,A1,A2,A3];
-As_sum = [0,cumsum(As)];
-idx = find(As_sum>=S/4,1,'first')-1;
-y_ac = fminsearch(@(y)(trapz([ys(idx),y],interp1(ys(idx:idx+1),cs(idx:idx+1),[ys(idx),y]))-(S/4-As_sum(idx))).^2,mean(ys(idx:idx+1)));
-obj.c_ac = interp1(ys,cs,y_ac);
-obj.x_ac = interp1(ys,x_qtr,y_ac);
+% MAC
+c_mac = (2/3) * c_r * (1 + tr + tr^2) / (1 + tr);
+obj.c_ac = c_mac;
 
-% place aerodynamic centre at WingPos
-Xs(:,1) = Xs(:,1) + (obj.WingPos-obj.x_ac);
-obj.x_ac = obj.WingPos;
+%% ============================================================
+%                 GEOMETRY POINTS
+%% ============================================================
+
+ys = [-span/2 -obj.KinkPos -R_f 0 R_f obj.KinkPos span/2]';
+cs = [c_t c c_r c_r c_r c c_t]';
+
+sweepLE = atand((tand(SweepQtrChord)*L3 + c/4 - c_t/4)/L3);
+
+x_le = [ ...
+    tand(sweepLE)*(L2+L3)
+    tand(sweepLE)*L2
+    0
+    0
+    0
+    tand(sweepLE)*L2
+    tand(sweepLE)*(L2+L3) ];
+
+x_le = x_le - 0.25*c_r;
+x_te = x_le + cs;
+
+Xs = [x_le ys; flipud(x_te) flipud(ys)];
+Xs(:,1) = Xs(:,1) + obj.WingPos;
 
 GeomObj = cast.GeomObj(Name="Wing", Xs=Xs);
-%% calcualte mass
-b_w  = obj.Span * SI.ft;           % [ft]
-S_w  = obj.WingArea * (SI.ft)^2;   % [ft^2]
 
-t_w = 0.15*c_r*SI.ft; % max thickness at root
-cosLambda     = cosd(sweepHalf);
+%% ============================================================
+%                 CLASS II.5 STRUCTURAL MODEL
+%% ============================================================
 
-% Design gross weight in pounds-force (no 9.81 anywhere)
-Wdg_lb = obj.MTOM * obj.Mf_TOC * SI.lb;  % choose design mass fraction Mf_TOC appropriately
-n_z    = 2.5 * 1.5;                      % ultimate
+g = 9.81;
+MTOM = obj.MTOM;
 
-% Pressurization factor (transport default)
-Wpc = 1.0;
+engine_mass = 0.023 * MTOM;
+engine_pos  = 0.4 * span/2;
 
-% Raymer wing weight [lb]
-w_wing = 0.00125 * Wdg_lb * (b_w/cosLambda)^0.75 * ...
-    (1 + sqrt(6.3*cosLambda/b_w))*n_z^0.55 * ...
-    (b_w*S_w/(t_w*Wdg_lb*cosLambda))^0.3;
+n_cases = [2.5 2.0 2.3];
 
-% Convert to mass [kg]
-m_wing = (w_wing / SI.lb);
+N = 400;
+y = linspace(0,span/2,N);
 
-massObj = cast.MassObj(Name="Wing",m=m_wing,X=[obj.x_ac;0]);
+% Initial guess
+wing_mass = 0.12 * MTOM;
+
+for iter = 1:5
+
+    M_roots = zeros(size(n_cases));
+
+    for i = 1:length(n_cases)
+
+        % ✅ Correct lift equilibrium
+        L = n_cases(i) * (MTOM - wing_mass - engine_mass) * g;
+
+        % Elliptical lift
+        q0 = (4*L)/(pi*span);
+        q  = q0 * sqrt(1-(2*y/span).^2);
+
+        % Wing weight
+        w_wing = (wing_mass * g)/(span/2);
+        q = q - w_wing;
+
+        % Engine load
+        F_engine = n_cases(i) * engine_mass * g;
+        [~,idx] = min(abs(y-engine_pos));
+
+        % Shear
+        V = cumtrapz(flip(y),flip(q));
+        V = flip(V);
+        V(idx:end) = V(idx:end) - F_engine;
+
+        % Bending moment
+        M = cumtrapz(flip(y),flip(V));
+        M = flip(M);
+
+        M_roots(i) = M(1);
+    end
+
+    M_design = max(M_roots);
+
+    %% STRUCTURAL SIZING
+
+    c_root = 2*obj.WingArea/(span*(1+tr));
+
+    box_height   = 0.12*c_root;
+    flange_width = 0.4*c_root;
+
+    sigma_allow = 250e6;
+    rho = 2800;
+
+    Z_req = M_design / sigma_allow;
+
+    A_skin_root = (2*Z_req)/box_height;
+    t_root = A_skin_root/(2*flange_width);
+
+    t_span = t_root * sqrt(1-(2*y/span).^2);
+
+    skin_volume = 2 * trapz(y, flange_width .* t_span);
+
+    t_spar_root = 0.02*c_root;
+    t_spar_tip  = 0.005*c_root;
+
+    t_spar_span = linspace(t_spar_root,t_spar_tip,N);
+    spar_volume = 2 * trapz(y, box_height .* t_spar_span);
+
+    rib_spacing = 0.6;
+    n_ribs = span / rib_spacing;
+
+    rib_area = flange_width * box_height;
+    rib_volume = n_ribs * rib_area * 0.0015;
+
+    structure_volume = skin_volume + spar_volume + rib_volume;
+    structure_mass = rho * structure_volume;
+
+    control_surface_mass = 0.05 * structure_mass;
+
+    new_wing_mass = structure_mass + control_surface_mass;
+
+    wing_mass = 0.5 * wing_mass + 0.5 * new_wing_mass;
+
 end
 
+m_wing = wing_mass;
+
+fprintf("DEBUG Final wing mass: %.2f tonnes\n", m_wing/1000);
+
+%% ============================================================
+%                 MASS OBJECT
+%% ============================================================
+
+massObj = cast.MassObj( ...
+    Name = "Wing_Structural", ...
+    m    = m_wing, ...
+    X    = [obj.WingPos; 0] );
+
+end
+
+%% ============================================================
+%                 HELPER FUNCTION
+%% ============================================================
 
 function [S,c_t,c_r,A1,A2,A3] = get_areas(c,L2,L3,R_f,tr,SweepQtrChord)
-    c_t = tr*c;
 
-    sweepLE = atand((tand(SweepQtrChord)*L3+c/4-c_t/4)/L3);
-    c_r = c + tand(sweepLE)*L2;
-    % c_r = (c-c_t)/L3*L2+c;  % if you want no kink
+c_t = tr * c;
 
-    % calc area of each area
-    A1 = c_r*R_f;
-    A2 = (c_r+c)/2*L2;
-    A3 = (c+c_t)/2*L3;
-    %calc total area
-    S = 2*(A1+A2+A3);
+sweepLE = atand((tand(SweepQtrChord)*L3 + c/4 - c_t/4)/L3);
+c_r = c + tand(sweepLE)*L2;
+
+A1 = c_r * R_f;
+A2 = (c_r + c)/2 * L2;
+A3 = (c + c_t)/2 * L3;
+
+S = 2*(A1 + A2 + A3);
+
 end

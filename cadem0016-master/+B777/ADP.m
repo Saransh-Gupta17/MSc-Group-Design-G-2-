@@ -18,6 +18,7 @@ classdef ADP < handle
         Mf_Fuel % fuel mass fraction 
         Mf_TOC  % "top of climb" mass fraction
         Mf_res  % "Resevre Fuel" mass fraction
+           
     end
     % constraint Paramters
     properties
@@ -60,6 +61,7 @@ classdef ADP < handle
 
         % planfrom specific
         Span;
+        AR = 9;
         WingArea;
         KinkPos;    % y position of wing kink 
         WingPos;    % Wing position along fuselage
@@ -70,7 +72,7 @@ classdef ADP < handle
 
         % Empenage Specific
         HtpArea;
-        VtpArea
+        VtpArea;
     end
 
     % useful properties
@@ -86,15 +88,10 @@ classdef ADP < handle
         CockpitLength = 6; %Assumed in metres
         CabinRadius
         CabinLength
+        L_total; %Total Cabin Length
         Fleet_size
         Total_Payload = 736000; %kg
-        Pallet_size = 246 %Total number of pallets
-        D_max = 7.5 %Maximum allowable diameter
-    end
-
-    methods
-        function out = AR(obj)
-            out = obj.Span^2/obj.WingArea;
-        end
+        Pallet_size = 246 ;%Total number of pallets
+        D_max = 7.5; %Maximum allowable diameter
     end
 end

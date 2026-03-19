@@ -14,6 +14,9 @@ classdef TLAR
         Alt_max     % max altitude in m
         Alt_cruise  % Cruise Altitude
         CrewMass    % Mass of the Crew
+        FlightHours = 120; %GUESS OF NUMBER OF FLIGHT HOURS PER AIRCRAFT
+        ParkingDays = 330; %GUESS OF NUMBER OF PARKING DAYS
+        FlightsPerYear = 48;
     end
 
     properties
