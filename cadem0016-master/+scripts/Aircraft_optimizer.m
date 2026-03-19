@@ -9,10 +9,13 @@ ADP.TLAR = cast.TLAR.B777F();
 
 %% ------------------------- Hyper-parameters ----------------------------
 ADP.TLAR.M_c = 0.84;
-ADP.Fleet_size = 5;
+ADP.Fleet_size = 6;
 ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size;
 
 ADP.AR = 9.5;
+ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
+ADP.WingLoading = (347815*9.81)/(473.3*cosd(31.6));
+ADP.cruise_altitude = 12000;
 
 %% ---------------------- Geometric parameters ---------------------------
 ADP.KinkPos = 10;

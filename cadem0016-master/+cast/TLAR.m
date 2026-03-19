@@ -32,7 +32,7 @@ classdef TLAR
     methods(Static)
         function obj = B777F
             obj = cast.TLAR();
-            obj.Range = 4800./SI.Nmile;% m (from nautical miles)
+            obj.Range = 4500./SI.Nmile;% m (from nautical miles)
             obj.GroundRun = 2830; %m
             obj.GroundRunLanding = 1500; %m
             obj.M_c = 0.82;

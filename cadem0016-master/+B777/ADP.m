@@ -18,12 +18,14 @@ classdef ADP < handle
         Mf_Fuel % fuel mass fraction 
         Mf_TOC  % "top of climb" mass fraction
         Mf_res  % "Resevre Fuel" mass fraction
+        cruise_altitude 
            
     end
     % constraint Paramters
     properties
         ThrustToWeightRatio  % 
         WingLoading          % 
+        ThrustToWeightRatio_c %TWR for cruise conditions
     end
     % Aerodynamic
     properties
