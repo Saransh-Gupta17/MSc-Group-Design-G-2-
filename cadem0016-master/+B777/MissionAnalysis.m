@@ -1,7 +1,17 @@
 function [BlockFuel, TripFuel, ResFuel, Mf_TOC, ...
-          MissionTime, Mission] = ...
+          MissionTime, Mission, CriticalTW, CriticalWS] = ...
           MissionAnalysis(ADP, tripRange, M_TO)
-%MISSIONANALYSIS Conduct mission analysis using nominal mission profile
+%MISSIONANALYSIS Conduct mission analysis using a refactored mission model
+%
+% Outputs:
+%   BlockFuel   - total fuel required [kg]
+%   TripFuel    - main mission fuel [kg]
+%   ResFuel     - reserve fuel [kg]
+%   Mf_TOC      - mass fraction at top of climb [-]
+%   MissionTime - total mission time incl. reserve segments [s]
+%   Mission     - struct containing detailed segment data
+%   CriticalTW  - struct containing critical T/W case over mission
+%   CriticalWS  - struct containing critical W/S case over mission
 
 arguments
     ADP
@@ -17,28 +27,30 @@ rho0 = 1.225; %#ok<NASGU>
 TaxiTime_out   = 20 * 60;      % s
 TaxiTime_in    = 20 * 60;      % s
 TakeoffTime    = 1 * 60;       % s
-ClimbTime      = 30 * 60;      % s
 ApproachTime   = 10 * 60;      % s
 LoiterTime     = 30 * 60;      % s
 ContTime       = 5 * 60;       % s
 AltRange       = 350e3;        % m
 
-gamma_to      = 10 * pi / 180;                 % rad
-ROC_to        = (20000 - 1500) / (30 * 196.85);
-ROC_climb_1   = (20000 - 1500) / (30 * 196.85);
-ROC_climb_2   = ROC_climb_1;
-ROC_climb_3   = ROC_climb_1;
-ROD_descent_1 = ROC_climb_1;
-ROD_descent_2 = ROD_descent_1;
-ROD_descent_3 = ROD_descent_1;
+gamma_to = 10 * pi / 180;      % rad
 
-V_climb_1   = 250 * 0.514444;   % m/s
-V_climb_2   = 300 * 0.514444;   % m/s
+% Vertical rates [m/s]
+ROC_to      = (20000 - 1500) / (30 * 196.85);
+ROC_climb_1 = (20000 - 1500) / (30 * 196.85);
+ROC_climb_2 = ROC_climb_1;
+ROC_climb_3 = ROC_climb_1;
+
+ROD_descent_1 = ROC_climb_1;
+ROD_descent_2 = ROC_climb_1;
+ROD_descent_3 = ROC_climb_1;
+
+% Speed schedules
+V_climb_1   = 250 * 0.514444;  % m/s
+V_climb_2   = 300 * 0.514444;  % m/s
 V_descent_2 = V_climb_2;
 V_descent_3 = V_climb_1;
 
 IdleFrac     = 0.07;
-TakeoffFrac  = 1.00; %#ok<NASGU>
 ClimbFrac    = 0.85;
 DescentFrac  = 0.12;
 ApproachFrac = 0.18;
@@ -55,16 +67,23 @@ Mission = struct();
 m_current = M_TO;
 
 %% ============================================================
-%% 2) Taxi out
+%% 1) Taxi out
 %% ============================================================
-FuelTaxiOut = segmentFuelFromThrustFrac(ADP, m_current, 0.0, 0, IdleFrac, TaxiTime_out);
+T_taxi = IdleFrac * getAvailableThrust(ADP, m_current, 0.0, 0);
+FuelTaxiOut = segmentFuelFromThrust(ADP, 0.0, 0, T_taxi, TaxiTime_out);
+[TaxiTW, TaxiWS] = thrustToWeightAndWingLoading(T_taxi, m_current, ADP.WingArea, g);
+
 m_current = m_current - FuelTaxiOut;
 
 Mission.TaxiOut.Fuel = FuelTaxiOut;
 Mission.TaxiOut.Time = TaxiTime_out;
+Mission.TaxiOut.Treq = T_taxi;
+Mission.TaxiOut.TW   = TaxiTW;
+Mission.TaxiOut.WS   = TaxiWS;
+Mission.TaxiOut.Range = 0;
 
 %% ============================================================
-%% 3) Take-off / initial climb / acceleration
+%% 2) Take-off / initial climb / acceleration
 %% ============================================================
 [rho_to, a_to, ~, ~] = cast.atmos(0);
 V_to = M_to * a_to;
@@ -76,6 +95,7 @@ D_to  = 0.5 * rho_to * V_to^2 * ADP.WingArea * CD_to;
 
 T_req_to = D_to + W * ROC_to / V_to;
 FuelTakeoff = segmentFuelFromThrust(ADP, M_to, 0, T_req_to, TakeoffTime);
+[TakeoffTW, TakeoffWS] = thrustToWeightAndWingLoading(T_req_to, m_current, ADP.WingArea, g);
 
 m_current = m_current - FuelTakeoff;
 
@@ -86,508 +106,143 @@ Mission.Takeoff.CD = CD_to;
 Mission.Takeoff.Drag = D_to;
 Mission.Takeoff.Treq = T_req_to;
 Mission.Takeoff.V = V_to;
+Mission.Takeoff.TW = TakeoffTW;
+Mission.Takeoff.WS = TakeoffWS;
+Mission.Takeoff.Range = V_to * TakeoffTime;
 
 %% ============================================================
-%% 4) Climb 1: 1500 ft to 10000 ft in 500 ft steps
+%% 3) Climb 1: 1500 ft to 10000 ft @ 250 kt
 %% ============================================================
-h_start = 1500 / SI.ft;
-h_end   = 10000 / SI.ft;
-dh      = 500 / SI.ft;
-
-nSteps = ceil((h_end - h_start) / dh);
-
-FuelClimb1 = 0;
-TimeClimb1 = 0;
-
-Mission.TakeoffClimb.StepFuel = zeros(nSteps,1);
-Mission.TakeoffClimb.StepMass = zeros(nSteps,1);
-Mission.TakeoffClimb.StepAlt  = zeros(nSteps,1);
-Mission.TakeoffClimb.StepMach = zeros(nSteps,1);
-Mission.TakeoffClimb.StepCL   = zeros(nSteps,1);
-Mission.TakeoffClimb.StepCD   = zeros(nSteps,1);
-Mission.TakeoffClimb.StepDrag = zeros(nSteps,1);
-Mission.TakeoffClimb.StepTreq = zeros(nSteps,1);
-Mission.TakeoffClimb.StepTime = zeros(nSteps,1);
-Mission.TakeoffClimb.StepV    = zeros(nSteps,1);
-
-for i = 1:nSteps
-    h_low = h_start + (i-1) * dh;
-    h_high = min(h_low + dh, h_end);
-    h_mid = 0.5 * (h_low + h_high);
-
-    [rho, a, ~, ~] = cast.atmos(h_mid);
-
-    Mach = V_climb_1 / a;
-    W = m_current * g;
-
-    CL_climb_1 = W / (0.5 * rho * V_climb_1^2 * ADP.WingArea);
-    CD_climb_1 = ADP.AeroPolar.CD(CL_climb_1);
-    D_climb_1  = 0.5 * rho * V_climb_1^2 * ADP.WingArea * CD_climb_1;
-
-    T_req_climb_1 = D_climb_1 + W * ROC_climb_1 / V_climb_1;
-
-    dh_step = h_high - h_low;
-    dt = dh_step / ROC_climb_1;
-
-    TSFC = ADP.Engine.TSFC(Mach, h_mid);
-    FuelStep = TSFC * T_req_climb_1 * dt;
-
-    m_current = m_current - FuelStep;
-    FuelClimb1 = FuelClimb1 + FuelStep;
-    TimeClimb1 = TimeClimb1 + dt;
-
-    Mission.TakeoffClimb.StepFuel(i) = FuelStep;
-    Mission.TakeoffClimb.StepMass(i) = m_current;
-    Mission.TakeoffClimb.StepAlt(i)  = h_mid;
-    Mission.TakeoffClimb.StepMach(i) = Mach;
-    Mission.TakeoffClimb.StepCL(i)   = CL_climb_1;
-    Mission.TakeoffClimb.StepCD(i)   = CD_climb_1;
-    Mission.TakeoffClimb.StepDrag(i) = D_climb_1;
-    Mission.TakeoffClimb.StepTreq(i) = T_req_climb_1;
-    Mission.TakeoffClimb.StepTime(i) = dt;
-    Mission.TakeoffClimb.StepV(i)    = V_climb_1;
-end
-
-Mission.TakeoffClimb.Fuel = FuelClimb1;
-Mission.TakeoffClimb.Time = TimeClimb1;
+[m_current, Seg] = flyVerticalSegment(ADP, m_current, ...
+    1500 / SI.ft, 10000 / SI.ft, 500 / SI.ft, ...
+    'TAS', V_climb_1, ROC_climb_1, 'Climb1');
+Mission.TakeoffClimb = Seg;
 
 %% ============================================================
-%% 5) Climb 2: 10000 ft to 20000 ft in 500 ft steps
+%% 4) Climb 2: 10000 ft to 20000 ft @ 300 kt
 %% ============================================================
-h_start = 10000 / SI.ft;
-h_end   = 20000 / SI.ft;
-dh      = 500 / SI.ft;
-
-nSteps = ceil((h_end - h_start) / dh);
-
-FuelClimb2 = 0;
-TimeClimb2 = 0;
-
-Mission.Climb2.StepFuel = zeros(nSteps,1);
-Mission.Climb2.StepMass = zeros(nSteps,1);
-Mission.Climb2.StepAlt  = zeros(nSteps,1);
-Mission.Climb2.StepMach = zeros(nSteps,1);
-Mission.Climb2.StepCL   = zeros(nSteps,1);
-Mission.Climb2.StepCD   = zeros(nSteps,1);
-Mission.Climb2.StepDrag = zeros(nSteps,1);
-Mission.Climb2.StepTreq = zeros(nSteps,1);
-Mission.Climb2.StepTime = zeros(nSteps,1);
-Mission.Climb2.StepV    = zeros(nSteps,1);
-
-for i = 1:nSteps
-    h_low = h_start + (i-1) * dh;
-    h_high = min(h_low + dh, h_end);
-    h_mid = 0.5 * (h_low + h_high);
-
-    [rho, a, ~, ~] = cast.atmos(h_mid);
-
-    Mach = V_climb_2 / a;
-    W = m_current * g;
-
-    CL_climb_2 = W / (0.5 * rho * V_climb_2^2 * ADP.WingArea);
-    CD_climb_2 = ADP.AeroPolar.CD(CL_climb_2);
-    D_climb_2  = 0.5 * rho * V_climb_2^2 * ADP.WingArea * CD_climb_2;
-
-    T_req_climb_2 = D_climb_2 + W * ROC_climb_2 / V_climb_2;
-
-    dh_step = h_high - h_low;
-    dt = dh_step / ROC_climb_2;
-
-    TSFC = ADP.Engine.TSFC(Mach, h_mid);
-    FuelStep = TSFC * T_req_climb_2 * dt;
-
-    m_current = m_current - FuelStep;
-    FuelClimb2 = FuelClimb2 + FuelStep;
-    TimeClimb2 = TimeClimb2 + dt;
-
-    Mission.Climb2.StepFuel(i) = FuelStep;
-    Mission.Climb2.StepMass(i) = m_current;
-    Mission.Climb2.StepAlt(i)  = h_mid;
-    Mission.Climb2.StepMach(i) = Mach;
-    Mission.Climb2.StepCL(i)   = CL_climb_2;
-    Mission.Climb2.StepCD(i)   = CD_climb_2;
-    Mission.Climb2.StepDrag(i) = D_climb_2;
-    Mission.Climb2.StepTreq(i) = T_req_climb_2;
-    Mission.Climb2.StepTime(i) = dt;
-    Mission.Climb2.StepV(i)    = V_climb_2;
-end
-
-Mission.Climb2.Fuel = FuelClimb2;
-Mission.Climb2.Time = TimeClimb2;
+[m_current, Seg] = flyVerticalSegment(ADP, m_current, ...
+    10000 / SI.ft, 20000 / SI.ft, 500 / SI.ft, ...
+    'TAS', V_climb_2, ROC_climb_2, 'Climb2');
+Mission.Climb2 = Seg;
 
 %% ============================================================
-%% 6) Climb 3: 20000 ft to cruise altitude in 500 ft steps
+%% 5) Climb 3: 20000 ft to cruise altitude @ Mach
 %% ============================================================
-h_start = 20000 / SI.ft;
-h_end   = ADP.cruise_altitude;
-dh      = 500 / SI.ft;
+[m_current, Seg] = flyVerticalSegment(ADP, m_current, ...
+    20000 / SI.ft, ADP.cruise_altitude, 500 / SI.ft, ...
+    'Mach', min(ADP.TLAR.M_c, 0.80), ROC_climb_3, 'Climb3');
+Mission.Climb3 = Seg;
 
-nSteps = max(0, ceil((h_end - h_start) / dh));
-
-FuelClimb3 = 0;
-TimeClimb3 = 0;
-
-Mission.Climb3.StepFuel = zeros(nSteps,1);
-Mission.Climb3.StepMass = zeros(nSteps,1);
-Mission.Climb3.StepAlt  = zeros(nSteps,1);
-Mission.Climb3.StepMach = zeros(nSteps,1);
-Mission.Climb3.StepCL   = zeros(nSteps,1);
-Mission.Climb3.StepCD   = zeros(nSteps,1);
-Mission.Climb3.StepDrag = zeros(nSteps,1);
-Mission.Climb3.StepTreq = zeros(nSteps,1);
-Mission.Climb3.StepTime = zeros(nSteps,1);
-Mission.Climb3.StepV    = zeros(nSteps,1);
-
-for i = 1:nSteps
-    h_low = h_start + (i-1) * dh;
-    h_high = min(h_low + dh, h_end);
-    h_mid = 0.5 * (h_low + h_high);
-
-    [rho, a, ~, ~] = cast.atmos(h_mid);
-
-    Mach = min(ADP.TLAR.M_c, 0.80);
-    V_climb_3 = Mach * a;
-    W = m_current * g;
-
-    CL_climb_3 = W / (0.5 * rho * V_climb_3^2 * ADP.WingArea);
-    CD_climb_3 = ADP.AeroPolar.CD(CL_climb_3);
-    D_climb_3  = 0.5 * rho * V_climb_3^2 * ADP.WingArea * CD_climb_3;
-
-    T_req_climb_3 = D_climb_3 + W * ROC_climb_3 / V_climb_3;
-
-    dh_step = h_high - h_low;
-    dt = dh_step / ROC_climb_3;
-
-    TSFC = ADP.Engine.TSFC(Mach, h_mid);
-    FuelStep = TSFC * T_req_climb_3 * dt;
-
-    m_current = m_current - FuelStep;
-    FuelClimb3 = FuelClimb3 + FuelStep;
-    TimeClimb3 = TimeClimb3 + dt;
-
-    Mission.Climb3.StepFuel(i) = FuelStep;
-    Mission.Climb3.StepMass(i) = m_current;
-    Mission.Climb3.StepAlt(i)  = h_mid;
-    Mission.Climb3.StepMach(i) = Mach;
-    Mission.Climb3.StepCL(i)   = CL_climb_3;
-    Mission.Climb3.StepCD(i)   = CD_climb_3;
-    Mission.Climb3.StepDrag(i) = D_climb_3;
-    Mission.Climb3.StepTreq(i) = T_req_climb_3;
-    Mission.Climb3.StepTime(i) = dt;
-    Mission.Climb3.StepV(i)    = V_climb_3;
-end
-
-Mission.Climb3.Fuel = FuelClimb3;
-Mission.Climb3.Time = TimeClimb3;
-
-FuelClimb = FuelClimb1 + FuelClimb2 + FuelClimb3;
-TimeClimb = TimeClimb1 + TimeClimb2 + TimeClimb3;
+FuelClimb = Mission.TakeoffClimb.Fuel + Mission.Climb2.Fuel + Mission.Climb3.Fuel;
+TimeClimb = Mission.TakeoffClimb.Time + Mission.Climb2.Time + Mission.Climb3.Time;
+RangeClimbTotal = Mission.TakeoffClimb.Range + Mission.Climb2.Range + Mission.Climb3.Range;
 
 Mf_TOC = m_current / M_TO;
 
 %% ============================================================
-%% 7) Cruise: stepped cruise-climb with constant CL target
+%% 5.5) Beginning-of-cruise study + cruise-climb requirement
 %% ============================================================
-RangeClimb1 = sum(Mission.TakeoffClimb.StepTime .* Mission.TakeoffClimb.StepV);
-RangeClimb2 = sum(Mission.Climb2.StepTime .* Mission.Climb2.StepV);
-RangeClimb3 = sum(Mission.Climb3.StepTime .* Mission.Climb3.StepV);
+% Requirement:
+% aircraft must be able to climb at 300 ft/min at cruise Mach
+% in cruise configuration, evaluated at beginning of cruise
 
-RangeClimbTotal = RangeClimb1 + RangeClimb2 + RangeClimb3;
+ROC_cruise_req = 300 / 196.85;   % 300 ft/min -> m/s
 
-RangeCruise = tripRange - 2 * RangeClimbTotal;
-RangeCruise = max(RangeCruise, 0);
+h_boc = ADP.cruise_altitude;
+m_boc = m_current;               % beginning-of-cruise mass
 
-dR = 50e3;
-nSteps = max(1, ceil(max(RangeCruise, 1) / dR));
+[rho_boc, a_boc, ~, ~] = cast.atmos(h_boc);
 
-FuelCruise = 0;
-TimeCruise = 0;
-RangeCruiseActual = 0;
+M_boc = M_cruise;
+V_boc = M_boc * a_boc;
+W_boc = m_boc * g;
 
-alt_cruise_step = ADP.cruise_altitude;
+CL_boc = W_boc / (0.5 * rho_boc * V_boc^2 * ADP.WingArea);
+CD_boc = ADP.AeroPolar.CD(CL_boc);
+D_boc  = 0.5 * rho_boc * V_boc^2 * ADP.WingArea * CD_boc;
+LD_boc = CL_boc / CD_boc;
 
-[rho_c0, a_c0, ~, ~] = cast.atmos(alt_cruise_step);
-V_c0 = M_cruise * a_c0;
-W_c0 = m_current * g;
+% Level cruise condition at beginning of cruise
+T_req_boc_cruise = D_boc;
+[TW_boc_cruise, WS_boc_cruise] = thrustToWeightAndWingLoading( ...
+    T_req_boc_cruise, m_boc, ADP.WingArea, g);
 
-CL_target = W_c0 / (0.5 * rho_c0 * V_c0^2 * ADP.WingArea);
+Mission.CruiseStudy.BeginCruise.Mass = m_boc;
+Mission.CruiseStudy.BeginCruise.Altitude = h_boc;
+Mission.CruiseStudy.BeginCruise.Mach = M_boc;
+Mission.CruiseStudy.BeginCruise.V = V_boc;
+Mission.CruiseStudy.BeginCruise.CL = CL_boc;
+Mission.CruiseStudy.BeginCruise.CD = CD_boc;
+Mission.CruiseStudy.BeginCruise.LD = LD_boc;
+Mission.CruiseStudy.BeginCruise.Drag = D_boc;
+Mission.CruiseStudy.BeginCruise.Treq = T_req_boc_cruise;
+Mission.CruiseStudy.BeginCruise.TW = TW_boc_cruise;
+Mission.CruiseStudy.BeginCruise.WS = WS_boc_cruise;
 
-Mission.Cruise.StepFuel  = zeros(nSteps,1);
-Mission.Cruise.StepMass  = zeros(nSteps,1);
-Mission.Cruise.StepAlt   = zeros(nSteps,1);
-Mission.Cruise.StepMach  = zeros(nSteps,1);
-Mission.Cruise.StepCL    = zeros(nSteps,1);
-Mission.Cruise.StepCD    = zeros(nSteps,1);
-Mission.Cruise.StepLD    = zeros(nSteps,1);
-Mission.Cruise.StepDrag  = zeros(nSteps,1);
-Mission.Cruise.StepTreq  = zeros(nSteps,1);
-Mission.Cruise.StepTime  = zeros(nSteps,1);
-Mission.Cruise.StepRange = zeros(nSteps,1);
-Mission.Cruise.StepV     = zeros(nSteps,1);
+% Cruise climb requirement: 300 ft/min at cruise Mach
+T_req_boc_cruiseclimb = D_boc + W_boc * ROC_cruise_req / V_boc;
+[TW_boc_cruiseclimb, WS_boc_cruiseclimb] = thrustToWeightAndWingLoading( ...
+    T_req_boc_cruiseclimb, m_boc, ADP.WingArea, g);
 
-for i = 1:nSteps
-    dR_step = min(dR, RangeCruise - RangeCruiseActual);
-    if dR_step <= 0
-        break
-    end
-
-    [rho, a, ~, ~] = cast.atmos(alt_cruise_step);
-
-    V = M_cruise * a;
-    W = m_current * g;
-
-    CL = W / (0.5 * rho * V^2 * ADP.WingArea);
-    CD = ADP.AeroPolar.CD(CL);
-    D  = 0.5 * rho * V^2 * ADP.WingArea * CD;
-    LD = CL / CD;
-
-    T_req = D;
-    dt = dR_step / V;
-
-    TSFC = ADP.Engine.TSFC(M_cruise, alt_cruise_step);
-    FuelStep = TSFC * T_req * dt;
-
-    m_current = m_current - FuelStep;
-    FuelCruise = FuelCruise + FuelStep;
-    TimeCruise = TimeCruise + dt;
-    RangeCruiseActual = RangeCruiseActual + dR_step;
-
-    Mission.Cruise.StepFuel(i)  = FuelStep;
-    Mission.Cruise.StepMass(i)  = m_current;
-    Mission.Cruise.StepAlt(i)   = alt_cruise_step;
-    Mission.Cruise.StepMach(i)  = M_cruise;
-    Mission.Cruise.StepCL(i)    = CL;
-    Mission.Cruise.StepCD(i)    = CD;
-    Mission.Cruise.StepLD(i)    = LD;
-    Mission.Cruise.StepDrag(i)  = D;
-    Mission.Cruise.StepTreq(i)  = T_req;
-    Mission.Cruise.StepTime(i)  = dt;
-    Mission.Cruise.StepRange(i) = dR_step;
-    Mission.Cruise.StepV(i)     = V;
-
-    alt_grid = linspace(ADP.cruise_altitude, 43e3 / SI.ft, 200);
-    [rho_grid, a_grid, ~, ~] = cast.atmos(alt_grid);
-
-    CL_grid = m_current * g ./ ...
-        (0.5 .* rho_grid .* (M_cruise .* a_grid).^2 .* ADP.WingArea);
-
-    [~, idxAlt] = min(abs(CL_grid - CL_target));
-    alt_cruise_step = alt_grid(idxAlt);
-end
-
-Mission.Cruise.Fuel = FuelCruise;
-Mission.Cruise.Time = TimeCruise;
-Mission.Cruise.Range = RangeCruiseActual;
-Mission.Cruise.Altitude = ADP.cruise_altitude;
-Mission.Cruise.FL = round(ADP.cruise_altitude * SI.ft / 100, 0);
-Mission.Cruise.CL = CL_target;
-Mission.Cruise.CD = ADP.AeroPolar.CD(CL_target);
-Mission.Cruise.LD = CL_target / ADP.AeroPolar.CD(CL_target);
+Mission.CruiseStudy.CruiseClimbRequirement.ROC = ROC_cruise_req;
+Mission.CruiseStudy.CruiseClimbRequirement.Mass = m_boc;
+Mission.CruiseStudy.CruiseClimbRequirement.Altitude = h_boc;
+Mission.CruiseStudy.CruiseClimbRequirement.Mach = M_boc;
+Mission.CruiseStudy.CruiseClimbRequirement.V = V_boc;
+Mission.CruiseStudy.CruiseClimbRequirement.CL = CL_boc;
+Mission.CruiseStudy.CruiseClimbRequirement.CD = CD_boc;
+Mission.CruiseStudy.CruiseClimbRequirement.LD = LD_boc;
+Mission.CruiseStudy.CruiseClimbRequirement.Drag = D_boc;
+Mission.CruiseStudy.CruiseClimbRequirement.Treq = T_req_boc_cruiseclimb;
+Mission.CruiseStudy.CruiseClimbRequirement.TW = TW_boc_cruiseclimb;
+Mission.CruiseStudy.CruiseClimbRequirement.WS = WS_boc_cruiseclimb;
 
 %% ============================================================
-%% 8) Descent 1: cruise altitude to 20000 ft in 500 ft steps
+%% 6) Main cruise: stepped cruise climb
 %% ============================================================
-h_start = ADP.cruise_altitude;
-h_end   = 20000 / SI.ft;
-dh      = 500 / SI.ft;
+RangeCruiseTarget = max(tripRange - 2 * RangeClimbTotal, 0);
 
-nSteps = max(0, ceil((h_start - h_end) / dh));
+[m_current, Seg] = flyCruiseSegment(ADP, m_current, ...
+    RangeCruiseTarget, M_cruise, ADP.cruise_altitude, 'MainCruise');
+Mission.Cruise = Seg;
 
-FuelDescent1 = 0;
-TimeDescent1 = 0;
-
-Mission.Descent1.StepFuel = zeros(nSteps,1);
-Mission.Descent1.StepMass = zeros(nSteps,1);
-Mission.Descent1.StepAlt  = zeros(nSteps,1);
-Mission.Descent1.StepMach = zeros(nSteps,1);
-Mission.Descent1.StepCL   = zeros(nSteps,1);
-Mission.Descent1.StepCD   = zeros(nSteps,1);
-Mission.Descent1.StepDrag = zeros(nSteps,1);
-Mission.Descent1.StepTreq = zeros(nSteps,1);
-Mission.Descent1.StepTime = zeros(nSteps,1);
-Mission.Descent1.StepV    = zeros(nSteps,1);
-
-for i = 1:nSteps
-    h_high = h_start - (i-1) * dh;
-    h_low  = max(h_high - dh, h_end);
-    h_mid  = 0.5 * (h_low + h_high);
-
-    [rho, a, ~, ~] = cast.atmos(h_mid);
-
-    Mach = min(ADP.TLAR.M_c, 0.80);
-    V_descent_1 = Mach * a;
-    W = m_current * g;
-
-    CL_descent_1 = W / (0.5 * rho * V_descent_1^2 * ADP.WingArea);
-    CD_descent_1 = ADP.AeroPolar.CD(CL_descent_1);
-    D_descent_1  = 0.5 * rho * V_descent_1^2 * ADP.WingArea * CD_descent_1;
-
-    T_idle = IdleFrac * 0.3 * m_current * g;
-    T_req_descent_1 = max(T_idle, D_descent_1 - W * ROD_descent_1 / V_descent_1);
-
-    dh_step = h_high - h_low;
-    dt = dh_step / ROD_descent_1;
-
-    TSFC = ADP.Engine.TSFC(Mach, h_mid);
-    FuelStep = TSFC * T_req_descent_1 * dt;
-
-    m_current = m_current - FuelStep;
-    FuelDescent1 = FuelDescent1 + FuelStep;
-    TimeDescent1 = TimeDescent1 + dt;
-
-    Mission.Descent1.StepFuel(i) = FuelStep;
-    Mission.Descent1.StepMass(i) = m_current;
-    Mission.Descent1.StepAlt(i)  = h_mid;
-    Mission.Descent1.StepMach(i) = Mach;
-    Mission.Descent1.StepCL(i)   = CL_descent_1;
-    Mission.Descent1.StepCD(i)   = CD_descent_1;
-    Mission.Descent1.StepDrag(i) = D_descent_1;
-    Mission.Descent1.StepTreq(i) = T_req_descent_1;
-    Mission.Descent1.StepTime(i) = dt;
-    Mission.Descent1.StepV(i)    = V_descent_1;
-end
-
-Mission.Descent1.Fuel = FuelDescent1;
-Mission.Descent1.Time = TimeDescent1;
+FuelCruise = Mission.Cruise.Fuel;
+TimeCruise = Mission.Cruise.Time;
+RangeCruiseActual = Mission.Cruise.Range;
 
 %% ============================================================
-%% 9) Descent 2: 20000 ft to 10000 ft in 500 ft steps
+%% 7) Descent 1: cruise altitude to 20000 ft @ Mach
 %% ============================================================
-h_start = 20000 / SI.ft;
-h_end   = 10000 / SI.ft;
-dh      = 500 / SI.ft;
-
-nSteps = ceil((h_start - h_end) / dh);
-
-FuelDescent2 = 0;
-TimeDescent2 = 0;
-
-Mission.Descent2.StepFuel = zeros(nSteps,1);
-Mission.Descent2.StepMass = zeros(nSteps,1);
-Mission.Descent2.StepAlt  = zeros(nSteps,1);
-Mission.Descent2.StepMach = zeros(nSteps,1);
-Mission.Descent2.StepCL   = zeros(nSteps,1);
-Mission.Descent2.StepCD   = zeros(nSteps,1);
-Mission.Descent2.StepDrag = zeros(nSteps,1);
-Mission.Descent2.StepTreq = zeros(nSteps,1);
-Mission.Descent2.StepTime = zeros(nSteps,1);
-Mission.Descent2.StepV    = zeros(nSteps,1);
-
-for i = 1:nSteps
-    h_high = h_start - (i-1) * dh;
-    h_low  = max(h_high - dh, h_end);
-    h_mid  = 0.5 * (h_low + h_high);
-
-    [rho, a, ~, ~] = cast.atmos(h_mid);
-
-    Mach = V_descent_2 / a;
-    W = m_current * g;
-
-    CL_descent_2 = W / (0.5 * rho * V_descent_2^2 * ADP.WingArea);
-    CD_descent_2 = ADP.AeroPolar.CD(CL_descent_2);
-    D_descent_2  = 0.5 * rho * V_descent_2^2 * ADP.WingArea * CD_descent_2;
-
-    T_idle = IdleFrac * 0.3 * m_current * g;
-    T_req_descent_2 = max(T_idle, D_descent_2 - W * ROD_descent_2 / V_descent_2);
-
-    dh_step = h_high - h_low;
-    dt = dh_step / ROD_descent_2;
-
-    TSFC = ADP.Engine.TSFC(Mach, h_mid);
-    FuelStep = TSFC * T_req_descent_2 * dt;
-
-    m_current = m_current - FuelStep;
-    FuelDescent2 = FuelDescent2 + FuelStep;
-    TimeDescent2 = TimeDescent2 + dt;
-
-    Mission.Descent2.StepFuel(i) = FuelStep;
-    Mission.Descent2.StepMass(i) = m_current;
-    Mission.Descent2.StepAlt(i)  = h_mid;
-    Mission.Descent2.StepMach(i) = Mach;
-    Mission.Descent2.StepCL(i)   = CL_descent_2;
-    Mission.Descent2.StepCD(i)   = CD_descent_2;
-    Mission.Descent2.StepDrag(i) = D_descent_2;
-    Mission.Descent2.StepTreq(i) = T_req_descent_2;
-    Mission.Descent2.StepTime(i) = dt;
-    Mission.Descent2.StepV(i)    = V_descent_2;
-end
-
-Mission.Descent2.Fuel = FuelDescent2;
-Mission.Descent2.Time = TimeDescent2;
+[m_current, Seg] = flyVerticalSegment(ADP, m_current, ...
+    ADP.cruise_altitude, 20000 / SI.ft, 500 / SI.ft, ...
+    'Mach', min(ADP.TLAR.M_c, 0.80), -ROD_descent_1, 'Descent1');
+Mission.Descent1 = Seg;
 
 %% ============================================================
-%% 10) Descent 3: 10000 ft to 1500 ft in 500 ft steps
+%% 8) Descent 2: 20000 ft to 10000 ft @ 300 kt
 %% ============================================================
-h_start = 10000 / SI.ft;
-h_end   = 1500 / SI.ft;
-dh      = 500 / SI.ft;
+[m_current, Seg] = flyVerticalSegment(ADP, m_current, ...
+    20000 / SI.ft, 10000 / SI.ft, 500 / SI.ft, ...
+    'TAS', V_descent_2, -ROD_descent_2, 'Descent2');
+Mission.Descent2 = Seg;
 
-nSteps = ceil((h_start - h_end) / dh);
+%% ============================================================
+%% 9) Descent 3: 10000 ft to 1500 ft @ 250 kt
+%% ============================================================
+[m_current, Seg] = flyVerticalSegment(ADP, m_current, ...
+    10000 / SI.ft, 1500 / SI.ft, 500 / SI.ft, ...
+    'TAS', V_descent_3, -ROD_descent_3, 'Descent3');
+Mission.Descent3 = Seg;
 
-FuelDescent3 = 0;
-TimeDescent3 = 0;
-
-Mission.Descent3.StepFuel = zeros(nSteps,1);
-Mission.Descent3.StepMass = zeros(nSteps,1);
-Mission.Descent3.StepAlt  = zeros(nSteps,1);
-Mission.Descent3.StepMach = zeros(nSteps,1);
-Mission.Descent3.StepCL   = zeros(nSteps,1);
-Mission.Descent3.StepCD   = zeros(nSteps,1);
-Mission.Descent3.StepDrag = zeros(nSteps,1);
-Mission.Descent3.StepTreq = zeros(nSteps,1);
-Mission.Descent3.StepTime = zeros(nSteps,1);
-Mission.Descent3.StepV    = zeros(nSteps,1);
-
-for i = 1:nSteps
-    h_high = h_start - (i-1) * dh;
-    h_low  = max(h_high - dh, h_end);
-    h_mid  = 0.5 * (h_low + h_high);
-
-    [rho, a, ~, ~] = cast.atmos(h_mid);
-
-    Mach = V_descent_3 / a;
-    W = m_current * g;
-
-    CL_descent_3 = W / (0.5 * rho * V_descent_3^2 * ADP.WingArea);
-    CD_descent_3 = ADP.AeroPolar.CD(CL_descent_3);
-    D_descent_3  = 0.5 * rho * V_descent_3^2 * ADP.WingArea * CD_descent_3;
-
-    T_idle = IdleFrac * 0.3 * m_current * g;
-    T_req_descent_3 = max(T_idle, D_descent_3 - W * ROD_descent_3 / V_descent_3);
-
-    dh_step = h_high - h_low;
-    dt = dh_step / ROD_descent_3;
-
-    TSFC = ADP.Engine.TSFC(Mach, h_mid);
-    FuelStep = TSFC * T_req_descent_3 * dt;
-
-    m_current = m_current - FuelStep;
-    FuelDescent3 = FuelDescent3 + FuelStep;
-    TimeDescent3 = TimeDescent3 + dt;
-
-    Mission.Descent3.StepFuel(i) = FuelStep;
-    Mission.Descent3.StepMass(i) = m_current;
-    Mission.Descent3.StepAlt(i)  = h_mid;
-    Mission.Descent3.StepMach(i) = Mach;
-    Mission.Descent3.StepCL(i)   = CL_descent_3;
-    Mission.Descent3.StepCD(i)   = CD_descent_3;
-    Mission.Descent3.StepDrag(i) = D_descent_3;
-    Mission.Descent3.StepTreq(i) = T_req_descent_3;
-    Mission.Descent3.StepTime(i) = dt;
-    Mission.Descent3.StepV(i)    = V_descent_3;
-end
-
-Mission.Descent3.Fuel = FuelDescent3;
-Mission.Descent3.Time = TimeDescent3;
-
-FuelDescent = FuelDescent1 + FuelDescent2 + FuelDescent3;
-TimeDescent = TimeDescent1 + TimeDescent2 + TimeDescent3;
-
+FuelDescent = Mission.Descent1.Fuel + Mission.Descent2.Fuel + Mission.Descent3.Fuel;
+TimeDescent = Mission.Descent1.Time + Mission.Descent2.Time + Mission.Descent3.Time;
 Mission.Descent.Fuel = FuelDescent;
 Mission.Descent.Time = TimeDescent;
+Mission.Descent.Range = Mission.Descent1.Range + Mission.Descent2.Range + Mission.Descent3.Range;
 
 %% ============================================================
-%% 11) Approach / landing
+%% 10) Approach / landing
 %% ============================================================
 alt_app = 0;
 [rho_app, a_app, ~, ~] = cast.atmos(alt_app);
@@ -600,10 +255,12 @@ CL_app = W / (0.5 * rho_app * V_app^2 * ADP.WingArea);
 CD_app = ADP.AeroPolar.CD(CL_app);
 D_app  = 0.5 * rho_app * V_app^2 * ADP.WingArea * CD_app;
 
-T_idle = IdleFrac * 0.3 * m_current * g;
+T_idle = getIdleThrust(ADP, m_current, Mach_app, alt_app, IdleFrac);
 T_req_app = max(T_idle, D_app);
 
 FuelApproach = segmentFuelFromThrust(ADP, Mach_app, alt_app, T_req_app, ApproachTime);
+[ApproachTW, ApproachWS] = thrustToWeightAndWingLoading(T_req_app, m_current, ADP.WingArea, g);
+
 m_current = m_current - FuelApproach;
 
 Mission.ApproachLanding.Fuel = FuelApproach;
@@ -613,56 +270,50 @@ Mission.ApproachLanding.CD = CD_app;
 Mission.ApproachLanding.Drag = D_app;
 Mission.ApproachLanding.Treq = T_req_app;
 Mission.ApproachLanding.V = V_app;
+Mission.ApproachLanding.TW = ApproachTW;
+Mission.ApproachLanding.WS = ApproachWS;
+Mission.ApproachLanding.Range = V_app * ApproachTime;
 
 %% ============================================================
-%% 12) Alternate climb
+%% 11) Alternate climb
 %% ============================================================
-FuelAltClimb = segmentFuelFromThrustFrac(ADP, m_current, M_climb, ADP.TLAR.Alt_alternate/2, ClimbFrac, ClimbTime);
-m_current = m_current - FuelAltClimb;
-
-Mission.Alternate.Climb.Fuel = FuelAltClimb;
-Mission.Alternate.Climb.Time = ClimbTime;
-
-%% ============================================================
-%% 13) Alternate cruise
-%% ============================================================
-[rho_alt, a_alt, ~, ~] = cast.atmos(ADP.TLAR.Alt_alternate);
-
-CL_alt = m_current * g / (0.5 * rho_alt * (a_alt * M_cruise)^2 * ADP.WingArea);
-CD_alt = ADP.AeroPolar.CD(CL_alt);
-LD_alt = CL_alt / CD_alt;
-
-fs_alt = exp(-AltRange * g * ADP.Engine.TSFC(M_cruise, ADP.TLAR.Alt_alternate) / ...
-            (M_cruise * a_alt * LD_alt));
-
-FuelAltCruise = (1 - fs_alt) * m_current;
-TimeAltCruise = AltRange / (M_cruise * a_alt);
-m_current = m_current * fs_alt;
-
-Mission.Alternate.Cruise.Fuel = FuelAltCruise;
-Mission.Alternate.Cruise.Time = TimeAltCruise;
+[m_current, Seg] = flyVerticalSegment(ADP, m_current, ...
+    0, ADP.TLAR.Alt_alternate, 500 / SI.ft, ...
+    'Mach', M_climb, ROC_climb_3, 'AltClimb');
+Mission.Alternate.Climb = Seg;
 
 %% ============================================================
-%% 14) Alternate descent
+%% 12) Alternate cruise
 %% ============================================================
-TimeAltDescent = max(10 * 60, ADP.TLAR.Alt_alternate / 10);
-FuelAltDescent = segmentFuelFromThrustFrac(ADP, m_current, M_desc, ADP.TLAR.Alt_alternate/2, DescentFrac, TimeAltDescent);
-m_current = m_current - FuelAltDescent;
-
-Mission.Alternate.Descent.Fuel = FuelAltDescent;
-Mission.Alternate.Descent.Time = TimeAltDescent;
+[m_current, Seg] = flyCruiseSegment(ADP, m_current, ...
+    AltRange, M_cruise, ADP.TLAR.Alt_alternate, 'AltCruise');
+Mission.Alternate.Cruise = Seg;
 
 %% ============================================================
-%% 15) Alternate approach
+%% 13) Alternate descent
 %% ============================================================
-FuelAltApproach = segmentFuelFromThrustFrac(ADP, m_current, M_ds, 0, ApproachFrac, ApproachTime);
+[m_current, Seg] = flyVerticalSegment(ADP, m_current, ...
+    ADP.TLAR.Alt_alternate, 0, 500 / SI.ft, ...
+    'Mach', M_desc, -ROD_descent_1, 'AltDescent');
+Mission.Alternate.Descent = Seg;
+
+%% ============================================================
+%% 14) Alternate approach
+%% ============================================================
+T_req_altapp = ApproachFrac * getAvailableThrust(ADP, m_current, M_ds, 0);
+FuelAltApproach = segmentFuelFromThrust(ADP, M_ds, 0, T_req_altapp, ApproachTime);
+[AltAppTW, AltAppWS] = thrustToWeightAndWingLoading(T_req_altapp, m_current, ADP.WingArea, g);
 m_current = m_current - FuelAltApproach;
 
 Mission.Alternate.Approach.Fuel = FuelAltApproach;
 Mission.Alternate.Approach.Time = ApproachTime;
+Mission.Alternate.Approach.Treq = T_req_altapp;
+Mission.Alternate.Approach.TW = AltAppTW;
+Mission.Alternate.Approach.WS = AltAppWS;
+Mission.Alternate.Approach.Range = 0;
 
 %% ============================================================
-%% 16) Loiter at 1500 ft for 30 min at minimum drag velocity
+%% 15) Loiter at 1500 ft for 30 min at min drag velocity
 %% ============================================================
 alt_loiter = 1500 / SI.ft;
 [rho_l, a_l, ~, ~] = cast.atmos(alt_loiter);
@@ -677,6 +328,8 @@ LD_loiter = CL_loiter / CD_loiter;
 
 V_loiter = sqrt((2 * m_current * g) / (rho_l * ADP.WingArea * CL_loiter));
 M_loiter = V_loiter / a_l;
+D_loiter = 0.5 * rho_l * V_loiter^2 * ADP.WingArea * CD_loiter;
+[LoiterTW, LoiterWS] = thrustToWeightAndWingLoading(D_loiter, m_current, ADP.WingArea, g);
 
 FuelLoiter = (1 - exp(-LoiterTime * g * ADP.Engine.TSFC(M_loiter, alt_loiter) / LD_loiter)) * m_current;
 m_current = m_current - FuelLoiter;
@@ -686,9 +339,13 @@ Mission.Loiter.Time = LoiterTime;
 Mission.Loiter.CL = CL_loiter;
 Mission.Loiter.CD = CD_loiter;
 Mission.Loiter.LD = LD_loiter;
+Mission.Loiter.Treq = D_loiter;
+Mission.Loiter.TW = LoiterTW;
+Mission.Loiter.WS = LoiterWS;
+Mission.Loiter.Range = V_loiter * LoiterTime;
 
 %% ============================================================
-%% 17) Contingency
+%% 16) Contingency
 %% ============================================================
 TripFuel_preCont = FuelTaxiOut + FuelTakeoff + FuelClimb + FuelCruise + ...
                    FuelDescent + FuelApproach;
@@ -700,22 +357,27 @@ m_current = m_current - FuelCont;
 
 Mission.Contingency.Fuel = FuelCont;
 Mission.Contingency.Time = ContTime;
+Mission.Contingency.Treq = D_loiter;
+Mission.Contingency.TW = LoiterTW;
+Mission.Contingency.WS = LoiterWS;
+Mission.Contingency.Range = V_loiter * ContTime;
 
 %% ============================================================
-%% 18) Totals
+%% 17) Totals
 %% ============================================================
 TripFuel = FuelTaxiOut + FuelTakeoff + FuelClimb + FuelCruise + ...
            FuelDescent + FuelApproach;
 
-ResFuel = FuelAltClimb + FuelAltCruise + FuelAltDescent + ...
-          FuelAltApproach + FuelLoiter + FuelCont;
+ResFuel = Mission.Alternate.Climb.Fuel + Mission.Alternate.Cruise.Fuel + ...
+          Mission.Alternate.Descent.Fuel + FuelAltApproach + ...
+          FuelLoiter + FuelCont;
 
 BlockFuel = TripFuel + ResFuel;
 
 MissionTime = TaxiTime_out + TakeoffTime + TimeClimb + TimeCruise + ...
               TimeDescent + ApproachTime + TaxiTime_in + ...
-              ClimbTime + TimeAltCruise + TimeAltDescent + ...
-              ApproachTime + LoiterTime + ContTime;
+              Mission.Alternate.Climb.Time + Mission.Alternate.Cruise.Time + ...
+              Mission.Alternate.Descent.Time + ApproachTime + LoiterTime + ContTime;
 
 Mission.Total.TripFuel = TripFuel;
 Mission.Total.ResFuel = ResFuel;
@@ -723,126 +385,99 @@ Mission.Total.BlockFuel = BlockFuel;
 Mission.Total.Time = MissionTime;
 
 %% ============================================================
-%% 19) Mission sanity-check summary
+%% 18) Mission sanity-check summary
 %% ============================================================
-Mission.Summary.Takeoff.Time = TakeoffTime;
-Mission.Summary.Takeoff.Fuel = FuelTakeoff;
-Mission.Summary.Takeoff.Speed = V_to;
-Mission.Summary.Takeoff.CL = CL_to;
-Mission.Summary.Takeoff.CD = CD_to;
-Mission.Summary.Takeoff.Drag = D_to;
-Mission.Summary.Takeoff.ThrustRequired = T_req_to;
+Mission.Summary.CruiseBegin.TW = Mission.CruiseStudy.BeginCruise.TW;
+Mission.Summary.CruiseBegin.WS = Mission.CruiseStudy.BeginCruise.WS;
+Mission.Summary.CruiseBegin.CL = Mission.CruiseStudy.BeginCruise.CL;
+Mission.Summary.CruiseBegin.CD = Mission.CruiseStudy.BeginCruise.CD;
+Mission.Summary.CruiseBegin.LD = Mission.CruiseStudy.BeginCruise.LD;
 
-Mission.Summary.Climb1.Time = TimeClimb1;
-Mission.Summary.Climb1.Fuel = FuelClimb1;
-Mission.Summary.Climb1.Speed = V_climb_1;
-if ~isempty(Mission.TakeoffClimb.StepMach)
-    Mission.Summary.Climb1.MachStart = Mission.TakeoffClimb.StepMach(1);
-    Mission.Summary.Climb1.MachEnd = Mission.TakeoffClimb.StepMach(end);
-    Mission.Summary.Climb1.MeanDrag = mean(Mission.TakeoffClimb.StepDrag);
-    Mission.Summary.Climb1.MeanThrustRequired = mean(Mission.TakeoffClimb.StepTreq);
-else
-    Mission.Summary.Climb1.MachStart = NaN;
-    Mission.Summary.Climb1.MachEnd = NaN;
-    Mission.Summary.Climb1.MeanDrag = NaN;
-    Mission.Summary.Climb1.MeanThrustRequired = NaN;
-end
+Mission.Summary.CruiseClimbReq.ROC_fpm = 300;
+Mission.Summary.CruiseClimbReq.TW = Mission.CruiseStudy.CruiseClimbRequirement.TW;
+Mission.Summary.CruiseClimbReq.WS = Mission.CruiseStudy.CruiseClimbRequirement.WS;
+Mission.Summary.CruiseClimbReq.Treq = Mission.CruiseStudy.CruiseClimbRequirement.Treq;
+Mission.Summary.CruiseClimbReq.Mach = Mission.CruiseStudy.CruiseClimbRequirement.Mach;
+Mission.Summary.CruiseClimbReq.Altitude = Mission.CruiseStudy.CruiseClimbRequirement.Altitude;
 
-Mission.Summary.Climb2.Time = TimeClimb2;
-Mission.Summary.Climb2.Fuel = FuelClimb2;
-Mission.Summary.Climb2.Speed = V_climb_2;
-if ~isempty(Mission.Climb2.StepMach)
-    Mission.Summary.Climb2.MachStart = Mission.Climb2.StepMach(1);
-    Mission.Summary.Climb2.MachEnd = Mission.Climb2.StepMach(end);
-    Mission.Summary.Climb2.MeanDrag = mean(Mission.Climb2.StepDrag);
-    Mission.Summary.Climb2.MeanThrustRequired = mean(Mission.Climb2.StepTreq);
-else
-    Mission.Summary.Climb2.MachStart = NaN;
-    Mission.Summary.Climb2.MachEnd = NaN;
-    Mission.Summary.Climb2.MeanDrag = NaN;
-    Mission.Summary.Climb2.MeanThrustRequired = NaN;
-end
+%% ============================================================
+%% 19) Critical T/W and W/S cases
+%% ============================================================
+twNames = {};
+twVals  = [];
+twAlts  = [];
+twMachs = [];
 
-if ~isempty(Mission.Climb3.StepMach)
-    Mission.Summary.Climb3.Time = TimeClimb3;
-    Mission.Summary.Climb3.Fuel = FuelClimb3;
-    Mission.Summary.Climb3.Mach = mean(Mission.Climb3.StepMach);
-    Mission.Summary.Climb3.SpeedStart = Mission.Climb3.StepV(1);
-    Mission.Summary.Climb3.SpeedEnd = Mission.Climb3.StepV(end);
-    Mission.Summary.Climb3.MeanDrag = mean(Mission.Climb3.StepDrag);
-    Mission.Summary.Climb3.MeanThrustRequired = mean(Mission.Climb3.StepTreq);
-else
-    Mission.Summary.Climb3.Time = 0;
-    Mission.Summary.Climb3.Fuel = 0;
-    Mission.Summary.Climb3.Mach = NaN;
-    Mission.Summary.Climb3.SpeedStart = NaN;
-    Mission.Summary.Climb3.SpeedEnd = NaN;
-    Mission.Summary.Climb3.MeanDrag = NaN;
-    Mission.Summary.Climb3.MeanThrustRequired = NaN;
-end
+wsNames = {};
+wsVals  = [];
+wsAlts  = [];
+wsMachs = [];
 
-Mission.Summary.Cruise.Time = TimeCruise;
-Mission.Summary.Cruise.Fuel = FuelCruise;
-Mission.Summary.Cruise.Range = RangeCruiseActual;
-Mission.Summary.Cruise.Mach = M_cruise;
-if any(Mission.Cruise.StepAlt > 0)
-    Mission.Summary.Cruise.MeanDrag = mean(Mission.Cruise.StepDrag(Mission.Cruise.StepAlt > 0));
-    Mission.Summary.Cruise.MeanThrustRequired = mean(Mission.Cruise.StepTreq(Mission.Cruise.StepAlt > 0));
-    idxFirstAlt = find(Mission.Cruise.StepAlt > 0, 1, 'first');
-    idxLastAlt  = find(Mission.Cruise.StepAlt > 0, 1, 'last');
-    Mission.Summary.Cruise.AltitudeStart = Mission.Cruise.StepAlt(idxFirstAlt);
-    Mission.Summary.Cruise.AltitudeEnd = Mission.Cruise.StepAlt(idxLastAlt);
-else
-    Mission.Summary.Cruise.MeanDrag = NaN;
-    Mission.Summary.Cruise.MeanThrustRequired = NaN;
-    Mission.Summary.Cruise.AltitudeStart = NaN;
-    Mission.Summary.Cruise.AltitudeEnd = NaN;
-end
+% ---------- T/W sizing cases ----------
+[twNames, twVals, twAlts, twMachs] = addCase(twNames, twVals, twAlts, twMachs, ...
+    'Takeoff', Mission.Takeoff.TW, 0, M_to);
 
-Mission.Summary.Descent1.Time = TimeDescent1;
-Mission.Summary.Descent1.Fuel = FuelDescent1;
-if ~isempty(Mission.Descent1.StepDrag)
-    Mission.Summary.Descent1.MeanDrag = mean(Mission.Descent1.StepDrag);
-    Mission.Summary.Descent1.MeanThrustRequired = mean(Mission.Descent1.StepTreq);
-else
-    Mission.Summary.Descent1.MeanDrag = NaN;
-    Mission.Summary.Descent1.MeanThrustRequired = NaN;
-end
+[twNames, twVals, twAlts, twMachs] = addMaxStepCase(twNames, twVals, twAlts, twMachs, ...
+    'Climb1', Mission.TakeoffClimb.StepTW, Mission.TakeoffClimb.StepAlt, Mission.TakeoffClimb.StepMach);
 
-Mission.Summary.Descent2.Time = TimeDescent2;
-Mission.Summary.Descent2.Fuel = FuelDescent2;
-if ~isempty(Mission.Descent2.StepDrag)
-    Mission.Summary.Descent2.MeanDrag = mean(Mission.Descent2.StepDrag);
-    Mission.Summary.Descent2.MeanThrustRequired = mean(Mission.Descent2.StepTreq);
-else
-    Mission.Summary.Descent2.MeanDrag = NaN;
-    Mission.Summary.Descent2.MeanThrustRequired = NaN;
-end
+[twNames, twVals, twAlts, twMachs] = addMaxStepCase(twNames, twVals, twAlts, twMachs, ...
+    'Climb2', Mission.Climb2.StepTW, Mission.Climb2.StepAlt, Mission.Climb2.StepMach);
 
-Mission.Summary.Descent3.Time = TimeDescent3;
-Mission.Summary.Descent3.Fuel = FuelDescent3;
-if ~isempty(Mission.Descent3.StepDrag)
-    Mission.Summary.Descent3.MeanDrag = mean(Mission.Descent3.StepDrag);
-    Mission.Summary.Descent3.MeanThrustRequired = mean(Mission.Descent3.StepTreq);
-else
-    Mission.Summary.Descent3.MeanDrag = NaN;
-    Mission.Summary.Descent3.MeanThrustRequired = NaN;
-end
+[twNames, twVals, twAlts, twMachs] = addMaxStepCase(twNames, twVals, twAlts, twMachs, ...
+    'Climb3', Mission.Climb3.StepTW, Mission.Climb3.StepAlt, Mission.Climb3.StepMach);
 
-Mission.Summary.Approach.Time = ApproachTime;
-Mission.Summary.Approach.Fuel = FuelApproach;
-Mission.Summary.Approach.Speed = V_app;
-Mission.Summary.Approach.CL = CL_app;
-Mission.Summary.Approach.CD = CD_app;
-Mission.Summary.Approach.Drag = D_app;
-Mission.Summary.Approach.ThrustRequired = T_req_app;
+[twNames, twVals, twAlts, twMachs] = addCase(twNames, twVals, twAlts, twMachs, ...
+    'CruiseClimbRequirement', ...
+    Mission.CruiseStudy.CruiseClimbRequirement.TW, ...
+    Mission.CruiseStudy.CruiseClimbRequirement.Altitude, ...
+    Mission.CruiseStudy.CruiseClimbRequirement.Mach);
 
-Mission.Summary.Total.MainMissionFuel = TripFuel;
-Mission.Summary.Total.ReserveFuel = ResFuel;
-Mission.Summary.Total.BlockFuel = BlockFuel;
-Mission.Summary.Total.MainMissionTime = TaxiTime_out + TakeoffTime + ...
-    TimeClimb + TimeCruise + TimeDescent + ApproachTime + TaxiTime_in;
-Mission.Summary.Total.TotalMissionTime = MissionTime;
+[twNames, twVals, twAlts, twMachs] = addCase(twNames, twVals, twAlts, twMachs, ...
+    'Approach', Mission.ApproachLanding.TW, 0, Mach_app);
+
+[twNames, twVals, twAlts, twMachs] = addMaxStepCase(twNames, twVals, twAlts, twMachs, ...
+    'AltClimb', Mission.Alternate.Climb.StepTW, Mission.Alternate.Climb.StepAlt, Mission.Alternate.Climb.StepMach);
+
+[twNames, twVals, twAlts, twMachs] = addCase(twNames, twVals, twAlts, twMachs, ...
+    'Loiter', Mission.Loiter.TW, alt_loiter, M_loiter);
+
+% ---------- W/S sizing cases ----------
+% Do NOT use TaxiOut as a sizing case
+[wsNames, wsVals, wsAlts, wsMachs] = addCase(wsNames, wsVals, wsAlts, wsMachs, ...
+    'Takeoff', Mission.Takeoff.WS, 0, M_to);
+
+[wsNames, wsVals, wsAlts, wsMachs] = addCase(wsNames, wsVals, wsAlts, wsMachs, ...
+    'BeginCruise', ...
+    Mission.CruiseStudy.BeginCruise.WS, ...
+    Mission.CruiseStudy.BeginCruise.Altitude, ...
+    Mission.CruiseStudy.BeginCruise.Mach);
+
+[wsNames, wsVals, wsAlts, wsMachs] = addCase(wsNames, wsVals, wsAlts, wsMachs, ...
+    'CruiseClimbRequirement', ...
+    Mission.CruiseStudy.CruiseClimbRequirement.WS, ...
+    Mission.CruiseStudy.CruiseClimbRequirement.Altitude, ...
+    Mission.CruiseStudy.CruiseClimbRequirement.Mach);
+
+[wsNames, wsVals, wsAlts, wsMachs] = addCase(wsNames, wsVals, wsAlts, wsMachs, ...
+    'Approach', Mission.ApproachLanding.WS, 0, Mach_app);
+
+[twMax, iTW] = max(twVals);
+[wsMax, iWS] = max(wsVals);
+
+CriticalTW.Value = twMax;
+CriticalTW.Segment = twNames{iTW};
+CriticalTW.Altitude_m = twAlts(iTW);
+CriticalTW.Mach = twMachs(iTW);
+CriticalTW.Description = sprintf('Critical T/W occurs in %s', twNames{iTW});
+
+CriticalWS.Value = wsMax;
+CriticalWS.Segment = wsNames{iWS};
+CriticalWS.Altitude_m = wsAlts(iWS);
+CriticalWS.Mach = wsMachs(iWS);
+CriticalWS.Description = sprintf('Critical W/S occurs in %s', wsNames{iWS});
+
+Mission.CriticalTW = CriticalTW;
+Mission.CriticalWS = CriticalWS;
 
 %% ============================================================
 %% 20) Diagnostic plot
@@ -868,14 +503,265 @@ grid on
 
 end
 
+%% ========================== Local helpers ==============================
+
+function [m_out, Seg] = flyVerticalSegment(ADP, m_in, h_start, h_end, dh, ...
+    speedMode, speedValue, roc, segName)
+% Unified climb/descent solver
+% roc > 0 climb, roc < 0 descent
+
+g = 9.81;
+
+Seg = struct();
+
+if h_start == h_end
+    Seg = emptyVerticalSeg();
+    m_out = m_in;
+    return
+end
+
+if roc == 0
+    error('flyVerticalSegment: roc cannot be zero.')
+end
+
+isClimb = h_end > h_start;
+if isClimb && roc < 0
+    error('flyVerticalSegment: climb requested with negative roc.')
+end
+if ~isClimb && roc > 0
+    error('flyVerticalSegment: descent requested with positive roc.')
+end
+
+nSteps = max(0, ceil(abs(h_end - h_start) / dh));
+
+Seg.StepFuel = zeros(nSteps,1);
+Seg.StepMass = zeros(nSteps,1);
+Seg.StepAlt  = zeros(nSteps,1);
+Seg.StepMach = zeros(nSteps,1);
+Seg.StepCL   = zeros(nSteps,1);
+Seg.StepCD   = zeros(nSteps,1);
+Seg.StepDrag = zeros(nSteps,1);
+Seg.StepTreq = zeros(nSteps,1);
+Seg.StepTime = zeros(nSteps,1);
+Seg.StepV    = zeros(nSteps,1);
+Seg.StepTW   = zeros(nSteps,1);
+Seg.StepWS   = zeros(nSteps,1);
+Seg.StepRange = zeros(nSteps,1);
+
+m_current = m_in;
+FuelTot = 0;
+TimeTot = 0;
+RangeTot = 0;
+
+for i = 1:nSteps
+    if isClimb
+        h_low  = h_start + (i-1) * dh;
+        h_high = min(h_low + dh, h_end);
+    else
+        h_high = h_start - (i-1) * dh;
+        h_low  = max(h_high - dh, h_end);
+    end
+
+    h_mid = 0.5 * (h_low + h_high);
+    dh_step = abs(h_high - h_low);
+
+    [rho, a, ~, ~] = cast.atmos(h_mid);
+
+    [V, Mach] = resolveSpeed(speedMode, speedValue, a);
+    W = m_current * g;
+
+    CL = W / (0.5 * rho * V^2 * ADP.WingArea);
+    CD = ADP.AeroPolar.CD(CL);
+    D  = 0.5 * rho * V^2 * ADP.WingArea * CD;
+
+    T_raw = D + W * roc / V;
+    T_idle = getIdleThrust(ADP, m_current, Mach, h_mid, 0.07);
+    T_req = max(T_idle, T_raw);
+
+    dt = dh_step / abs(roc);
+    dR = V * dt;
+
+    TSFC = ADP.Engine.TSFC(Mach, h_mid);
+    FuelStep = TSFC * T_req * dt;
+
+    [TW_step, WS_step] = thrustToWeightAndWingLoading(T_req, m_current, ADP.WingArea, g);
+
+    m_current = m_current - FuelStep;
+    FuelTot = FuelTot + FuelStep;
+    TimeTot = TimeTot + dt;
+    RangeTot = RangeTot + dR;
+
+    Seg.StepFuel(i) = FuelStep;
+    Seg.StepMass(i) = m_current;
+    Seg.StepAlt(i)  = h_mid;
+    Seg.StepMach(i) = Mach;
+    Seg.StepCL(i)   = CL;
+    Seg.StepCD(i)   = CD;
+    Seg.StepDrag(i) = D;
+    Seg.StepTreq(i) = T_req;
+    Seg.StepTime(i) = dt;
+    Seg.StepV(i)    = V;
+    Seg.StepTW(i)   = TW_step;
+    Seg.StepWS(i)   = WS_step;
+    Seg.StepRange(i)= dR;
+end
+
+Seg.Fuel = FuelTot;
+Seg.Time = TimeTot;
+Seg.Range = RangeTot;
+Seg.MaxTW = maxOrNaN(Seg.StepTW);
+Seg.MaxWS = maxOrNaN(Seg.StepWS);
+Seg.Name = segName;
+
+m_out = m_current;
+end
+
+function [m_out, Seg] = flyCruiseSegment(ADP, m_in, rangeTarget, Mach, h_start, segName)
+% Stepped cruise-climb with constant CL target
+
+g = 9.81;
+dR = 50e3;
+
+Seg = struct();
+
+nSteps = max(1, ceil(max(rangeTarget, 1) / dR));
+
+Seg.StepFuel  = zeros(nSteps,1);
+Seg.StepMass  = zeros(nSteps,1);
+Seg.StepAlt   = zeros(nSteps,1);
+Seg.StepMach  = zeros(nSteps,1);
+Seg.StepCL    = zeros(nSteps,1);
+Seg.StepCD    = zeros(nSteps,1);
+Seg.StepLD    = zeros(nSteps,1);
+Seg.StepDrag  = zeros(nSteps,1);
+Seg.StepTreq  = zeros(nSteps,1);
+Seg.StepTime  = zeros(nSteps,1);
+Seg.StepRange = zeros(nSteps,1);
+Seg.StepV     = zeros(nSteps,1);
+Seg.StepTW    = zeros(nSteps,1);
+Seg.StepWS    = zeros(nSteps,1);
+
+m_current = m_in;
+FuelTot = 0;
+TimeTot = 0;
+RangeActual = 0;
+alt_step = h_start;
+
+[rho0, a0, ~, ~] = cast.atmos(alt_step);
+V0 = Mach * a0;
+W0 = m_current * g;
+CL_target = W0 / (0.5 * rho0 * V0^2 * ADP.WingArea);
+
+for i = 1:nSteps
+    dR_step = min(dR, rangeTarget - RangeActual);
+    if dR_step <= 0
+        break
+    end
+
+    [rho, a, ~, ~] = cast.atmos(alt_step);
+
+    V = Mach * a;
+    W = m_current * g;
+
+    CL = W / (0.5 * rho * V^2 * ADP.WingArea);
+    CD = ADP.AeroPolar.CD(CL);
+    D  = 0.5 * rho * V^2 * ADP.WingArea * CD;
+    LD = CL / CD;
+    T_req = D;
+
+    [TW_step, WS_step] = thrustToWeightAndWingLoading(T_req, m_current, ADP.WingArea, g);
+
+    dt = dR_step / V;
+    TSFC = ADP.Engine.TSFC(Mach, alt_step);
+    FuelStep = TSFC * T_req * dt;
+
+    m_current = m_current - FuelStep;
+    FuelTot = FuelTot + FuelStep;
+    TimeTot = TimeTot + dt;
+    RangeActual = RangeActual + dR_step;
+
+    Seg.StepFuel(i)  = FuelStep;
+    Seg.StepMass(i)  = m_current;
+    Seg.StepAlt(i)   = alt_step;
+    Seg.StepMach(i)  = Mach;
+    Seg.StepCL(i)    = CL;
+    Seg.StepCD(i)    = CD;
+    Seg.StepLD(i)    = LD;
+    Seg.StepDrag(i)  = D;
+    Seg.StepTreq(i)  = T_req;
+    Seg.StepTime(i)  = dt;
+    Seg.StepRange(i) = dR_step;
+    Seg.StepV(i)     = V;
+    Seg.StepTW(i)    = TW_step;
+    Seg.StepWS(i)    = WS_step;
+
+    alt_grid = linspace(h_start, 43e3 / SI.ft, 200);
+    [rho_grid, a_grid, ~, ~] = cast.atmos(alt_grid);
+
+    CL_grid = m_current * g ./ ...
+        (0.5 .* rho_grid .* (Mach .* a_grid).^2 .* ADP.WingArea);
+
+    [~, idxAlt] = min(abs(CL_grid - CL_target));
+    alt_step = alt_grid(idxAlt);
+end
+
+Seg.Fuel = FuelTot;
+Seg.Time = TimeTot;
+Seg.Range = RangeActual;
+Seg.Altitude = h_start;
+Seg.FL = round(h_start * SI.ft / 100, 0);
+Seg.CL = CL_target;
+Seg.CD = ADP.AeroPolar.CD(CL_target);
+Seg.LD = CL_target / ADP.AeroPolar.CD(CL_target);
+Seg.MaxTW = maxOrNaN(Seg.StepTW);
+Seg.MaxWS = maxOrNaN(Seg.StepWS);
+Seg.Name = segName;
+
+m_out = m_current;
+end
+
+function Seg = emptyVerticalSeg()
+Seg.StepFuel = [];
+Seg.StepMass = [];
+Seg.StepAlt = [];
+Seg.StepMach = [];
+Seg.StepCL = [];
+Seg.StepCD = [];
+Seg.StepDrag = [];
+Seg.StepTreq = [];
+Seg.StepTime = [];
+Seg.StepV = [];
+Seg.StepTW = [];
+Seg.StepWS = [];
+Seg.StepRange = [];
+Seg.Fuel = 0;
+Seg.Time = 0;
+Seg.Range = 0;
+Seg.MaxTW = NaN;
+Seg.MaxWS = NaN;
+Seg.Name = '';
+end
+
+function [V, Mach] = resolveSpeed(speedMode, speedValue, a)
+switch upper(speedMode)
+    case 'TAS'
+        V = speedValue;
+        Mach = V / a;
+    case 'MACH'
+        Mach = speedValue;
+        V = Mach * a;
+    otherwise
+        error('Unknown speedMode: %s', speedMode)
+end
+end
+
 function Fuel = segmentFuelFromThrust(ADP, Mach, alt_m, T_req, time_s)
 TSFC = ADP.Engine.TSFC(Mach, alt_m);
 Fuel = TSFC * T_req * time_s;
 end
 
-function Fuel = segmentFuelFromThrustFrac(ADP, mass_kg, Mach, alt_m, thrustFrac, time_s)
+function T_avail = getAvailableThrust(ADP, mass_kg, Mach, alt_m)
 g = 9.81;
-
 if ismethod(ADP.Engine, 'Thrust')
     try
         T_avail = ADP.Engine.Thrust(Mach, alt_m);
@@ -885,7 +771,45 @@ if ismethod(ADP.Engine, 'Thrust')
 else
     T_avail = 0.3 * mass_kg * g;
 end
+end
 
-TSFC = ADP.Engine.TSFC(Mach, alt_m);
-Fuel = TSFC * thrustFrac * T_avail * time_s;
+function T_idle = getIdleThrust(ADP, mass_kg, Mach, alt_m, idleFrac)
+T_avail = getAvailableThrust(ADP, mass_kg, Mach, alt_m);
+T_idle = idleFrac * T_avail;
+end
+
+function [TW, WS] = thrustToWeightAndWingLoading(T_req, mass_kg, wingArea, g)
+W = mass_kg * g;
+TW = T_req / W;
+WS = W / wingArea;
+end
+
+function val = maxOrNaN(x)
+if isempty(x)
+    val = NaN;
+else
+    val = max(x);
+end
+end
+
+function [names, vals, alts, machs] = addCase(names, vals, alts, machs, name, value, alt, mach)
+if ~isnan(value)
+    names{end+1} = name; %#ok<AGROW>
+    vals(end+1,1) = value; %#ok<AGROW>
+    alts(end+1,1) = alt; %#ok<AGROW>
+    machs(end+1,1) = mach; %#ok<AGROW>
+end
+end
+
+function [names, vals, alts, machs] = addMaxStepCase(names, vals, alts, machs, name, values, stepAlt, stepMach)
+if isempty(values)
+    return
+end
+[v, idx] = max(values);
+if ~isempty(v) && ~isnan(v)
+    names{end+1} = name; %#ok<AGROW>
+    vals(end+1,1) = v; %#ok<AGROW>
+    alts(end+1,1) = stepAlt(idx); %#ok<AGROW>
+    machs(end+1,1) = stepMach(idx); %#ok<AGROW>
+end
 end

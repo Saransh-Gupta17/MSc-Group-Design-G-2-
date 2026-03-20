@@ -312,3 +312,45 @@ xlabel('Aspect Ratio')
 ylabel('MTOM [t]')
 title('Aspect Ratio vs MTOM')
 grid on
+
+%% ==============================================================
+%% Trade Study 5: MTOM vs Wing Loading
+%% ==============================================================
+WingLoadings = 7000:250:9000;   % [N/m^2]
+
+mtoms_ws = zeros(size(WingLoadings));
+final_ws = zeros(size(WingLoadings));
+
+for i = 1:length(WingLoadings)
+    ADPi = ADP0;
+
+    % Set the trial wing loading
+    ADPi.WingLoading = WingLoadings(i);
+
+    % Optional: keep T/W fixed at baseline initial guess
+    % ADPi.ThrustToWeightRatio = ADP0.ThrustToWeightRatio;
+
+    % Re-size aircraft
+    ADPi = B777.Size(ADPi);
+
+    % Store outputs
+    mtoms_ws(i) = ADPi.MTOM;
+    final_ws(i) = ADPi.WingLoading;
+end
+
+figure(6); clf;
+tt = tiledlayout(2,1);
+
+nexttile;
+plot(WingLoadings, mtoms_ws/1e3, '-o', 'LineWidth', 1.5)
+xlabel('Input Wing Loading [N/m^2]')
+ylabel('MTOM [t]')
+title('MTOM vs Input Wing Loading')
+grid on
+
+nexttile;
+plot(WingLoadings, final_ws, '-s', 'LineWidth', 1.5)
+xlabel('Input Wing Loading [N/m^2]')
+ylabel('Final Converged Wing Loading [N/m^2]')
+title('Final Wing Loading vs Input Wing Loading')
+grid on
