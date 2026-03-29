@@ -10,7 +10,7 @@ ADP.TLAR = cast.TLAR.B777F();   % top level aircraft requirements
 
 %% ------------------------- Hyper-parameters ----------------------------
 ADP.TLAR.M_c = 0.84;
-ADP.Fleet_size = 6;
+ADP.Fleet_size = 5;
 ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size;
 
 ADP.AR = 9.5;
@@ -44,7 +44,6 @@ ADP = B777.Size(ADP);
 %% ------------------- Build geometry and masses -------------------------
 [B7Geom, B7Mass] = B777.BuildGeometry(ADP);
 d = B7Mass.GetData;
-
 
 %% ------------------------- Mission analysis ----------------------------
 [BlockFuel, ~, ~, ~, ~] = B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
@@ -116,7 +115,7 @@ fprintf('MTOM                               : %8.1f t\n', ADP.MTOM/1e3);
 fprintf('Estimated fuel mass                : %8.1f t\n', ADP.Mf_Fuel*ADP.MTOM/1e3);
 fprintf('Block fuel per mission             : %8.1f t\n', BlockFuel/1e3);
 
-% --- DEBUG: see all wing entries ---
+% --- see all wing entries (please dont remove my code keeps breaking) ---
 wingIdxAll = contains(d(:,1), "Wing");
 
 disp("---- ALL WING ENTRIES ----")
@@ -205,35 +204,3 @@ CostSummary = table(CostNames, CostValues_MUSD, ...
 disp(' ');
 disp('Cost Summary Table:');
 disp(CostSummary);
-
-%  WING STRUCTURAL PLOTS 
-
-y  = ADP.Wing_y;
-V  = ADP.Wing_V;
-M  = ADP.Wing_M;
-EI = ADP.Wing_EI;
-
-
-figure;
-
-subplot(4,1,1)
-plot(y, V/1e6, 'LineWidth', 2);
-ylabel('Shear [MN]');
-title('Wing Structural Distributions');
-grid on;
-
-subplot(4,1,2)
-plot(y, M/1e6, 'LineWidth', 2);
-ylabel('Moment [MNm]');
-grid on;
-
-subplot(4,1,3)
-plot(y, EI/1e9, 'LineWidth', 2);
-ylabel('EI [GN·m²]');
-grid on;
-
-subplot(4,1,4)
-plot(y, ADP.Wing_GJ/1e9, 'LineWidth', 2);
-ylabel('GJ [GN·m²]');
-xlabel('Spanwise location y [m]');
-grid on;
