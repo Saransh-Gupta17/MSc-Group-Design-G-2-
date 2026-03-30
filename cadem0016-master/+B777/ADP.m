@@ -83,6 +83,13 @@ classdef ADP < handle
         x_ac % x location of mean geometeric chord
         c_ach % mean geometric chord of HTP
         c_acv % mean geometric chord of VTP
+        % -------- Wing structural outputs (for plotting) --------
+
+        Wing_y
+        Wing_V
+        Wing_M
+        Wing_EI
+        Wing_GJ
     end
 
     % fuselage properties

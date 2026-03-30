@@ -114,7 +114,7 @@ fprintf('\n--- Mass / Fuel --------------------------------------------\n');
 fprintf('MTOM                               : %8.1f t\n', ADP.MTOM/1e3);
 fprintf('Block fuel per mission             : %8.1f t\n', BlockFuel/1e3);
 
-% --- DEBUG: see all wing entries ---
+% --- see all wing entries (please dont remove my code keeps breaking) ---
 wingIdxAll = contains(d(:,1), "Wing");
 
 disp("---- ALL WING ENTRIES ----")
