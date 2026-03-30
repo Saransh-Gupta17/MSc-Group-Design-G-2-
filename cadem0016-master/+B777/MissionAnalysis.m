@@ -26,19 +26,16 @@ rho0 = 1.225; %#ok<NASGU>
 %% ---------------------- Mission assumptions ---------------------------
 TaxiTime_out   = 20 * 60;      % s
 TaxiTime_in    = 20 * 60;      % s
-TakeoffTime    = 1 * 60;       % s
 ApproachTime   = 10 * 60;      % s
 LoiterTime     = 30 * 60;      % s
 ContTime       = 5 * 60;       % s
 AltRange       = 350e3;        % m
 
-gamma_to = 10 * pi / 180;      % rad
-
 % Vertical rates [m/s]
 ROC_to      = (20000 - 1500) / (30 * 196.85);
-ROC_climb_1 = (20000 - 1500) / (30 * 196.85);
-ROC_climb_2 = ROC_climb_1;
-ROC_climb_3 = ROC_climb_1;
+ROC_climb_1 = ROC_to;
+ROC_climb_2 = ROC_to;
+ROC_climb_3 = ROC_to;
 
 ROD_descent_1 = ROC_climb_1;
 ROD_descent_2 = ROC_climb_1;
@@ -51,8 +48,8 @@ V_descent_2 = V_climb_2;
 V_descent_3 = V_climb_1;
 
 IdleFrac     = 0.07;
-ClimbFrac    = 0.85;
-DescentFrac  = 0.12;
+ClimbFrac    = 0.85; %#ok<NASGU>
+DescentFrac  = 0.12; %#ok<NASGU>
 ApproachFrac = 0.18;
 
 M_cruise = ADP.TLAR.M_c;
@@ -75,40 +72,81 @@ FuelTaxiOut = segmentFuelFromThrust(ADP, 0.0, 0, T_taxi, TaxiTime_out);
 
 m_current = m_current - FuelTaxiOut;
 
-Mission.TaxiOut.Fuel = FuelTaxiOut;
-Mission.TaxiOut.Time = TaxiTime_out;
-Mission.TaxiOut.Treq = T_taxi;
-Mission.TaxiOut.TW   = TaxiTW;
-Mission.TaxiOut.WS   = TaxiWS;
+Mission.TaxiOut.Fuel  = FuelTaxiOut;
+Mission.TaxiOut.Time  = TaxiTime_out;
+Mission.TaxiOut.Treq  = T_taxi;
+Mission.TaxiOut.TW    = TaxiTW;
+Mission.TaxiOut.WS    = TaxiWS;
 Mission.TaxiOut.Range = 0;
 
 %% ============================================================
-%% 2) Take-off / initial climb / acceleration
+%% 2A) Ground acceleration / takeoff sizing from field length
 %% ============================================================
-[rho_to, a_to, ~, ~] = cast.atmos(0);
-V_to = M_to * a_to;
+[TakeoffTW, T_req_ground, TOGround] = sizeTakeoffFromFieldLength( ...
+    ADP, m_current, 2570, ...
+    'CLmaxTO', 2.4, ...
+    'MuRoll', 0.02, ...
+    'Altitude', 0);
+
+FuelTakeoffGround = segmentFuelFromThrust( ...
+    ADP, 0.0, 0, T_req_ground, TOGround.EstimatedGroundRollTime);
+
+m_current = m_current - FuelTakeoffGround;
+
+Mission.TakeoffGround.Fuel   = FuelTakeoffGround;
+Mission.TakeoffGround.Time   = TOGround.EstimatedGroundRollTime;
+Mission.TakeoffGround.Treq   = T_req_ground;
+Mission.TakeoffGround.TW     = TakeoffTW;
+Mission.TakeoffGround.Vlof   = TOGround.Vlof;
+Mission.TakeoffGround.Vstall = TOGround.Vstall_to;
+Mission.TakeoffGround.Range  = TOGround.EstimatedRange;
+Mission.TakeoffGround.CL     = TOGround.CLground;
+Mission.TakeoffGround.CD     = TOGround.CDground;
+Mission.TakeoffGround.Drag   = TOGround.D_avg;
+Mission.TakeoffGround.WS     = TOGround.WingLoading;
+
+%% ============================================================
+%% 2B) Initial climb to 1500 ft
+%% ============================================================
+h_end = 1500 * 0.3048;   % ft to m
+V_climb = 250 * 0.514444;   % 250 kt in m/s
 W = m_current * g;
 
-CL_to = W * cos(gamma_to) / (0.5 * rho_to * V_to^2 * ADP.WingArea);
-CD_to = ADP.AeroPolar.CD(CL_to);
-D_to  = 0.5 * rho_to * V_to^2 * ADP.WingArea * CD_to;
+[rho_climb, a_climb, ~, ~] = cast.atmos(h_end/2);
 
-T_req_to = D_to + W * ROC_to / V_to;
-FuelTakeoff = segmentFuelFromThrust(ADP, M_to, 0, T_req_to, TakeoffTime);
-[TakeoffTW, TakeoffWS] = thrustToWeightAndWingLoading(T_req_to, m_current, ADP.WingArea, g);
+CL_climb = W / (0.5 * rho_climb * V_climb^2 * ADP.WingArea);
+CD_climb = ADP.AeroPolar.CD(CL_climb);
+D_climb  = 0.5 * rho_climb * V_climb^2 * ADP.WingArea * CD_climb;
 
-m_current = m_current - FuelTakeoff;
+% Use a fixed, reasonable initial climb rate instead of forcing
+% the aircraft to reach 1500 ft within a remaining time budget.
+ROC_initial = 12.0;   % m/s  (~2360 ft/min), reasonable first-pass value
 
-Mission.Takeoff.Fuel = FuelTakeoff;
-Mission.Takeoff.Time = TakeoffTime;
-Mission.Takeoff.CL = CL_to;
-Mission.Takeoff.CD = CD_to;
-Mission.Takeoff.Drag = D_to;
-Mission.Takeoff.Treq = T_req_to;
-Mission.Takeoff.V = V_to;
-Mission.Takeoff.TW = TakeoffTW;
-Mission.Takeoff.WS = TakeoffWS;
-Mission.Takeoff.Range = V_to * TakeoffTime;
+t_climb = h_end / ROC_initial;
+
+T_req_climb = D_climb + W * ROC_initial / V_climb;
+Mach_climb = V_climb / a_climb;
+
+FuelInitialClimb = segmentFuelFromThrust(ADP, Mach_climb, h_end/2, T_req_climb, t_climb);
+ROC_climb = ROC_initial;
+
+m_current = m_current - FuelInitialClimb;
+
+Mission.InitialClimb.Fuel     = FuelInitialClimb;
+Mission.InitialClimb.Time     = t_climb;
+Mission.InitialClimb.CL       = CL_climb;
+Mission.InitialClimb.CD       = CD_climb;
+Mission.InitialClimb.Drag     = D_climb;
+Mission.InitialClimb.Treq     = T_req_climb;
+Mission.InitialClimb.V        = V_climb;
+Mission.InitialClimb.TW       = T_req_climb / W;
+Mission.InitialClimb.WS       = W / ADP.WingArea;
+Mission.InitialClimb.Range    = V_climb * t_climb;
+Mission.InitialClimb.ROC      = ROC_climb;
+Mission.InitialClimb.Mach     = Mach_climb;
+Mission.InitialClimb.Altitude = h_end / 2;
+Mission.InitialClimb.h_start  = 0;
+Mission.InitialClimb.h_end    = h_end;
 
 %% ============================================================
 %% 3) Climb 1: 1500 ft to 10000 ft @ 250 kt
@@ -116,7 +154,7 @@ Mission.Takeoff.Range = V_to * TakeoffTime;
 [m_current, Seg] = flyVerticalSegment(ADP, m_current, ...
     1500 / SI.ft, 10000 / SI.ft, 500 / SI.ft, ...
     'TAS', V_climb_1, ROC_climb_1, 'Climb1');
-Mission.TakeoffClimb = Seg;
+Mission.Climb1 = Seg;
 
 %% ============================================================
 %% 4) Climb 2: 10000 ft to 20000 ft @ 300 kt
@@ -134,23 +172,24 @@ Mission.Climb2 = Seg;
     'Mach', min(ADP.TLAR.M_c, 0.80), ROC_climb_3, 'Climb3');
 Mission.Climb3 = Seg;
 
-FuelClimb = Mission.TakeoffClimb.Fuel + Mission.Climb2.Fuel + Mission.Climb3.Fuel;
-TimeClimb = Mission.TakeoffClimb.Time + Mission.Climb2.Time + Mission.Climb3.Time;
-RangeClimbTotal = Mission.TakeoffClimb.Range + Mission.Climb2.Range + Mission.Climb3.Range;
+FuelClimb = Mission.InitialClimb.Fuel + Mission.Climb1.Fuel + ...
+            Mission.Climb2.Fuel + Mission.Climb3.Fuel;
+
+TimeClimb = Mission.InitialClimb.Time + Mission.Climb1.Time + ...
+            Mission.Climb2.Time + Mission.Climb3.Time;
+
+RangeClimbTotal = Mission.InitialClimb.Range + Mission.Climb1.Range + ...
+                  Mission.Climb2.Range + Mission.Climb3.Range;
 
 Mf_TOC = m_current / M_TO;
 
 %% ============================================================
 %% 5.5) Beginning-of-cruise study + cruise-climb requirement
 %% ============================================================
-% Requirement:
-% aircraft must be able to climb at 300 ft/min at cruise Mach
-% in cruise configuration, evaluated at beginning of cruise
-
 ROC_cruise_req = 300 / 196.85;   % 300 ft/min -> m/s
 
 h_boc = ADP.cruise_altitude;
-m_boc = m_current;               % beginning-of-cruise mass
+m_boc = m_current;
 
 [rho_boc, a_boc, ~, ~] = cast.atmos(h_boc);
 
@@ -163,7 +202,6 @@ CD_boc = ADP.AeroPolar.CD(CL_boc);
 D_boc  = 0.5 * rho_boc * V_boc^2 * ADP.WingArea * CD_boc;
 LD_boc = CL_boc / CD_boc;
 
-% Level cruise condition at beginning of cruise
 T_req_boc_cruise = D_boc;
 [TW_boc_cruise, WS_boc_cruise] = thrustToWeightAndWingLoading( ...
     T_req_boc_cruise, m_boc, ADP.WingArea, g);
@@ -180,7 +218,6 @@ Mission.CruiseStudy.BeginCruise.Treq = T_req_boc_cruise;
 Mission.CruiseStudy.BeginCruise.TW = TW_boc_cruise;
 Mission.CruiseStudy.BeginCruise.WS = WS_boc_cruise;
 
-% Cruise climb requirement: 300 ft/min at cruise Mach
 T_req_boc_cruiseclimb = D_boc + W_boc * ROC_cruise_req / V_boc;
 [TW_boc_cruiseclimb, WS_boc_cruiseclimb] = thrustToWeightAndWingLoading( ...
     T_req_boc_cruiseclimb, m_boc, ADP.WingArea, g);
@@ -209,7 +246,7 @@ Mission.Cruise = Seg;
 
 FuelCruise = Mission.Cruise.Fuel;
 TimeCruise = Mission.Cruise.Time;
-RangeCruiseActual = Mission.Cruise.Range;
+RangeCruiseActual = Mission.Cruise.Range; %#ok<NASGU>
 
 %% ============================================================
 %% 7) Descent 1: cruise altitude to 20000 ft @ Mach
@@ -237,6 +274,7 @@ Mission.Descent3 = Seg;
 
 FuelDescent = Mission.Descent1.Fuel + Mission.Descent2.Fuel + Mission.Descent3.Fuel;
 TimeDescent = Mission.Descent1.Time + Mission.Descent2.Time + Mission.Descent3.Time;
+
 Mission.Descent.Fuel = FuelDescent;
 Mission.Descent.Time = TimeDescent;
 Mission.Descent.Range = Mission.Descent1.Range + Mission.Descent2.Range + Mission.Descent3.Range;
@@ -347,8 +385,8 @@ Mission.Loiter.Range = V_loiter * LoiterTime;
 %% ============================================================
 %% 16) Contingency
 %% ============================================================
-TripFuel_preCont = FuelTaxiOut + FuelTakeoff + FuelClimb + FuelCruise + ...
-                   FuelDescent + FuelApproach;
+TripFuel_preCont = FuelTaxiOut + Mission.TakeoffGround.Fuel + FuelClimb + ...
+                   FuelCruise + FuelDescent + FuelApproach;
 
 Fuel5min = (1 - exp(-ContTime * g * ADP.Engine.TSFC(M_loiter, alt_loiter) / LD_loiter)) * m_current;
 FuelCont = max(Fuel5min, 0.03 * TripFuel_preCont);
@@ -365,8 +403,8 @@ Mission.Contingency.Range = V_loiter * ContTime;
 %% ============================================================
 %% 17) Totals
 %% ============================================================
-TripFuel = FuelTaxiOut + FuelTakeoff + FuelClimb + FuelCruise + ...
-           FuelDescent + FuelApproach;
+TripFuel = FuelTaxiOut + Mission.TakeoffGround.Fuel + FuelClimb + ...
+           FuelCruise + FuelDescent + FuelApproach;
 
 ResFuel = Mission.Alternate.Climb.Fuel + Mission.Alternate.Cruise.Fuel + ...
           Mission.Alternate.Descent.Fuel + FuelAltApproach + ...
@@ -374,7 +412,7 @@ ResFuel = Mission.Alternate.Climb.Fuel + Mission.Alternate.Cruise.Fuel + ...
 
 BlockFuel = TripFuel + ResFuel;
 
-MissionTime = TaxiTime_out + TakeoffTime + TimeClimb + TimeCruise + ...
+MissionTime = TaxiTime_out + Mission.TakeoffGround.Time + TimeClimb + TimeCruise + ...
               TimeDescent + ApproachTime + TaxiTime_in + ...
               Mission.Alternate.Climb.Time + Mission.Alternate.Cruise.Time + ...
               Mission.Alternate.Descent.Time + ApproachTime + LoiterTime + ContTime;
@@ -387,6 +425,14 @@ Mission.Total.Time = MissionTime;
 %% ============================================================
 %% 18) Mission sanity-check summary
 %% ============================================================
+Mission.Summary.TakeoffGround.TW = Mission.TakeoffGround.TW;
+Mission.Summary.TakeoffGround.WS = Mission.TakeoffGround.WS;
+Mission.Summary.TakeoffGround.Vlof = Mission.TakeoffGround.Vlof;
+
+Mission.Summary.InitialClimb.TW = Mission.InitialClimb.TW;
+Mission.Summary.InitialClimb.WS = Mission.InitialClimb.WS;
+Mission.Summary.InitialClimb.ROC = Mission.InitialClimb.ROC;
+
 Mission.Summary.CruiseBegin.TW = Mission.CruiseStudy.BeginCruise.TW;
 Mission.Summary.CruiseBegin.WS = Mission.CruiseStudy.BeginCruise.WS;
 Mission.Summary.CruiseBegin.CL = Mission.CruiseStudy.BeginCruise.CL;
@@ -415,10 +461,14 @@ wsMachs = [];
 
 % ---------- T/W sizing cases ----------
 [twNames, twVals, twAlts, twMachs] = addCase(twNames, twVals, twAlts, twMachs, ...
-    'Takeoff', Mission.Takeoff.TW, 0, M_to);
+    'TakeoffGround', Mission.TakeoffGround.TW, 0, 0);
+
+[twNames, twVals, twAlts, twMachs] = addCase(twNames, twVals, twAlts, twMachs, ...
+    'InitialClimb', Mission.InitialClimb.TW, ...
+    Mission.InitialClimb.Altitude, Mission.InitialClimb.Mach);
 
 [twNames, twVals, twAlts, twMachs] = addMaxStepCase(twNames, twVals, twAlts, twMachs, ...
-    'Climb1', Mission.TakeoffClimb.StepTW, Mission.TakeoffClimb.StepAlt, Mission.TakeoffClimb.StepMach);
+    'Climb1', Mission.Climb1.StepTW, Mission.Climb1.StepAlt, Mission.Climb1.StepMach);
 
 [twNames, twVals, twAlts, twMachs] = addMaxStepCase(twNames, twVals, twAlts, twMachs, ...
     'Climb2', Mission.Climb2.StepTW, Mission.Climb2.StepAlt, Mission.Climb2.StepMach);
@@ -442,9 +492,12 @@ wsMachs = [];
     'Loiter', Mission.Loiter.TW, alt_loiter, M_loiter);
 
 % ---------- W/S sizing cases ----------
-% Do NOT use TaxiOut as a sizing case
 [wsNames, wsVals, wsAlts, wsMachs] = addCase(wsNames, wsVals, wsAlts, wsMachs, ...
-    'Takeoff', Mission.Takeoff.WS, 0, M_to);
+    'TakeoffGround', Mission.TakeoffGround.WS, 0, 0);
+
+[wsNames, wsVals, wsAlts, wsMachs] = addCase(wsNames, wsVals, wsAlts, wsMachs, ...
+    'InitialClimb', Mission.InitialClimb.WS, ...
+    Mission.InitialClimb.Altitude, Mission.InitialClimb.Mach);
 
 [wsNames, wsVals, wsAlts, wsMachs] = addCase(wsNames, wsVals, wsAlts, wsMachs, ...
     'BeginCruise', ...
@@ -812,4 +865,112 @@ if ~isempty(v) && ~isnan(v)
     alts(end+1,1) = stepAlt(idx); %#ok<AGROW>
     machs(end+1,1) = stepMach(idx); %#ok<AGROW>
 end
+end
+
+function [TW_required, T_required, out] = sizeTakeoffFromFieldLength(ADP, m_current, TakeoffFieldLength, varargin)
+% sizeTakeoffFromFieldLength
+%
+% Preliminary ground-roll takeoff sizing from a required takeoff field length.
+
+p = inputParser;
+p.FunctionName = 'sizeTakeoffFromFieldLength';
+
+addParameter(p, 'Altitude',       0.0,  @(x) isnumeric(x) && isscalar(x));
+addParameter(p, 'CLmaxTO',        2.4,  @(x) isnumeric(x) && isscalar(x) && x > 0);
+addParameter(p, 'CLgroundFactor', 0.7,  @(x) isnumeric(x) && isscalar(x) && x > 0);
+addParameter(p, 'MuRoll',         0.02, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'VlofFactor',     1.10, @(x) isnumeric(x) && isscalar(x) && x > 1.0);
+addParameter(p, 'VavgFactor',     0.70, @(x) isnumeric(x) && isscalar(x) && x > 0 && x <= 1.0);
+addParameter(p, 'GammaRunway',    0.0,  @(x) isnumeric(x) && isscalar(x));
+
+parse(p, varargin{:});
+opt = p.Results;
+
+g = 9.81;
+S = ADP.WingArea;
+W = m_current * g;
+
+if S <= 0
+    error('sizeTakeoffFromFieldLength:InvalidWingArea', ...
+        'ADP.WingArea must be positive.');
+end
+
+if TakeoffFieldLength <= 0
+    error('sizeTakeoffFromFieldLength:InvalidFieldLength', ...
+        'TakeoffFieldLength must be positive.');
+end
+
+[rho_to, a_to, ~, ~] = cast.atmos(opt.Altitude);
+
+CLmaxTO = opt.CLmaxTO;
+CLg = opt.CLgroundFactor * CLmaxTO;
+
+Vstall_to = sqrt(2 * W / (rho_to * S * CLmaxTO));
+Vlof      = opt.VlofFactor * Vstall_to;
+Vavg      = opt.VavgFactor * Vlof;
+
+q_avg = 0.5 * rho_to * Vavg^2;
+
+try
+    CDg = ADP.AeroPolar.CD(CLg);
+catch
+    error('sizeTakeoffFromFieldLength:AeroPolarCallFailed', ...
+        ['Could not evaluate ADP.AeroPolar.CD(CLg). Make sure ', ...
+         'ADP.AeroPolar.CD accepts a CL input and returns CD.']);
+end
+
+L_avg = q_avg * S * CLg;
+D_avg = q_avg * S * CDg;
+
+L_W = L_avg / W;
+D_W = D_avg / W;
+
+a_avg = Vlof^2 / (2 * TakeoffFieldLength);
+
+TW_required = ...
+    a_avg / g + ...
+    D_W + ...
+    opt.MuRoll * (1 - L_W) + ...
+    sin(opt.GammaRunway);
+
+T_required = TW_required * W;
+
+out = struct();
+
+out.g                  = g;
+out.Altitude           = opt.Altitude;
+out.rho_to             = rho_to;
+out.a_to               = a_to;
+
+out.Mass               = m_current;
+out.Weight             = W;
+out.WingArea           = S;
+out.WingLoading        = W / S;
+
+out.TakeoffFieldLength = TakeoffFieldLength;
+
+out.CLmaxTO            = CLmaxTO;
+out.CLgroundFactor     = opt.CLgroundFactor;
+out.CLground           = CLg;
+out.CDground           = CDg;
+
+out.Vstall_to          = Vstall_to;
+out.Vlof               = Vlof;
+out.Vavg               = Vavg;
+
+out.q_avg              = q_avg;
+out.L_avg              = L_avg;
+out.D_avg              = D_avg;
+out.L_W                = L_W;
+out.D_W                = D_W;
+
+out.MuRoll             = opt.MuRoll;
+out.GammaRunway        = opt.GammaRunway;
+
+out.a_avg              = a_avg;
+out.TW_required        = TW_required;
+out.T_required         = T_required;
+
+out.EstimatedGroundRollTime = Vlof / a_avg;
+out.EstimatedRange          = TakeoffFieldLength;
 end

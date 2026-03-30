@@ -10,11 +10,11 @@ ADP.TLAR = cast.TLAR.B777F();   % top level aircraft requirements
 
 %% ------------------------- Hyper-parameters ----------------------------
 ADP.TLAR.M_c = 0.84;
-ADP.Fleet_size = 5;
-ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size;
+ADP.Fleet_size = 10;
+ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size; %NOT A HYPERPARAMTEER
 
-ADP.AR = 9.5;
-ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
+ADP.AR = 8.5;
+ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81); %THIS IS NOT A HYPERPARAMETER
 ADP.WingLoading = 9000;
 ADP.cruise_altitude = 12000;
 
@@ -112,7 +112,6 @@ fprintf('VTP position                       : %8.2f m\n', ADP.VtpPos);
 
 fprintf('\n--- Mass / Fuel --------------------------------------------\n');
 fprintf('MTOM                               : %8.1f t\n', ADP.MTOM/1e3);
-fprintf('Estimated fuel mass                : %8.1f t\n', ADP.Mf_Fuel*ADP.MTOM/1e3);
 fprintf('Block fuel per mission             : %8.1f t\n', BlockFuel/1e3);
 
 % --- DEBUG: see all wing entries ---
@@ -204,3 +203,26 @@ CostSummary = table(CostNames, CostValues_MUSD, ...
 disp(' ');
 disp('Cost Summary Table:');
 disp(CostSummary);
+
+fprintf('\n--- Engine Properties --------------------------------------\n');
+
+eng = ADP.Engine;
+
+props = properties(eng);
+
+for i = 1:length(props)
+    val = eng.(props{i});
+
+    if isnumeric(val) && isscalar(val)
+        fprintf('%-30s : %g\n', props{i}, val);
+
+    elseif isnumeric(val) && ~isscalar(val)
+        fprintf('%-30s : [%s]\n', props{i}, num2str(val));
+
+    elseif ischar(val) || isstring(val)
+        fprintf('%-30s : %s\n', props{i}, val);
+
+    else
+        fprintf('%-30s : [non-displayable type]\n', props{i});
+    end
+end
