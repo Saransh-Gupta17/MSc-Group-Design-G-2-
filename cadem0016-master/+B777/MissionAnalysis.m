@@ -412,15 +412,23 @@ ResFuel = Mission.Alternate.Climb.Fuel + Mission.Alternate.Cruise.Fuel + ...
 
 BlockFuel = TripFuel + ResFuel;
 
-MissionTime = TaxiTime_out + Mission.TakeoffGround.Time + TimeClimb + TimeCruise + ...
-              TimeDescent + ApproachTime + TaxiTime_in + ...
+AirborneDesignMissionTime = Mission.TakeoffGround.Time + ...
+                            TimeClimb + TimeCruise + TimeDescent + ...
+                            ApproachTime;
+
+DesignMissionTime = TaxiTime_out + AirborneDesignMissionTime + TaxiTime_in;
+
+MissionTime = DesignMissionTime + ...
               Mission.Alternate.Climb.Time + Mission.Alternate.Cruise.Time + ...
-              Mission.Alternate.Descent.Time + ApproachTime + LoiterTime + ContTime;
+              Mission.Alternate.Descent.Time + ApproachTime + ...
+              LoiterTime + ContTime;
 
 Mission.Total.TripFuel = TripFuel;
 Mission.Total.ResFuel = ResFuel;
 Mission.Total.BlockFuel = BlockFuel;
-Mission.Total.Time = MissionTime;
+Mission.Total.AirborneDesignMissionTime = AirborneDesignMissionTime;
+Mission.Total.DesignMissionTime = DesignMissionTime;
+Mission.Total.TotalMissionTime = MissionTime;
 
 %% ============================================================
 %% 18) Mission sanity-check summary
