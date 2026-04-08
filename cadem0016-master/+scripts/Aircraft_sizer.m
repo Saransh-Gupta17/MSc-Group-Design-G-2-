@@ -10,7 +10,7 @@ ADP.TLAR = cast.TLAR.B777F();   % top level aircraft requirements
 
 %% ------------------------- Hyper-parameters ----------------------------
 ADP.TLAR.M_c = 0.84;
-ADP.Fleet_size = 5;
+ADP.Fleet_size = 6;
 ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size;
 
 ADP.AR = 9.5;
@@ -109,7 +109,6 @@ fprintf('Wing span                          : %8.2f m\n', ADP.Span);
 fprintf('Wing position                      : %8.2f m\n', ADP.WingPos);
 fprintf('HTP position                       : %8.2f m\n', ADP.HtpPos);
 fprintf('VTP position                       : %8.2f m\n', ADP.VtpPos);
-
 fprintf('\n--- Mass / Fuel --------------------------------------------\n');
 fprintf('MTOM                               : %8.1f t\n', ADP.MTOM/1e3);
 fprintf('Estimated fuel mass                : %8.1f t\n', ADP.Mf_Fuel*ADP.MTOM/1e3);
@@ -204,3 +203,37 @@ CostSummary = table(CostNames, CostValues_MUSD, ...
 disp(' ');
 disp('Cost Summary Table:');
 disp(CostSummary);
+
+%% ================== STRUCTURAL PLOTS ==================
+
+% ---- SHEAR FORCE ----
+figure;
+plot(ADP.Wing_y, ADP.Wing_V/1e6, 'LineWidth', 2);
+xlabel('Spanwise position y (m)');
+ylabel('Shear Force (MN)');
+title('Spanwise Shear Force Distribution');
+grid on;
+
+% ---- BENDING MOMENT ----
+figure;
+plot(ADP.Wing_y, ADP.Wing_M/1e6, 'LineWidth', 2); 
+xlabel('Spanwise position y (m)');
+ylabel('Bending Moment (MNm)');
+title('Spanwise Bending Moment Distribution');
+grid on;
+
+% ---- FLEXURAL RIGIDITY EI ----
+figure;
+plot(ADP.Wing_y, ADP.Wing_EI/1e9, 'LineWidth', 2);
+xlabel('Spanwise position y (m)');
+ylabel('EI (GNm^2)');
+title('Spanwise Flexural Rigidity (EI)');
+grid on;
+
+% ---- TORSIONAL RIGIDITY GJ ----
+figure;
+plot(ADP.Wing_y, ADP.Wing_GJ/1e9, 'LineWidth', 2);
+xlabel('Spanwise position y (m)');
+ylabel('GJ (GNm^2)');
+title('Spanwise Torsional Rigidity (GJ)');
+grid on;

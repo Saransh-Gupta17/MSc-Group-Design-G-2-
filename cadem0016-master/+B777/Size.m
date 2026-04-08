@@ -5,38 +5,45 @@ delta = inf;
 B777.ConstraintAnalysis(ADP);
 
 while delta > 1
-    % Constraint analysis
 
-    % Build geometry
+    %% 1. ENGINE MODEL 
+    engine = cast.eng.TurboFan.GE90();
+
+    if ADP.isSizeEng
+        engine = engine.Rubberise(ADP.Thrust);
+    end
+
+    ADP.Engine = engine;
+    ADP.EngineLocation = 0.4 * ADP.Span/2;
+
+    %% 2. Build geometry
     [~, B7Mass] = B777.BuildGeometry(ADP);
 
-    % Update aero
+    %% 3. Update aero
     B777.UpdateAero(ADP);
 
-    % Mission analysis
+    %% 4. Mission analysis
     [BlockFuel, TripFuel, ResFuel, Mf_TOC, MissionTime, Mission, CriticalTW, CriticalWS] = ...
-    B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
+        B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
 
-    %Update Thrust/Weight Ratio and required wing loading
-    %ADP.WingLoading = CriticalWS.Value;
+    %% 5. Update T/W
     ADP.ThrustToWeightRatio = CriticalTW.Value;
 
-    %Update Constraint Analysis
+    %% 6. Constraint analysis
     B777.ConstraintAnalysis(ADP);
 
-
-    % OEM
+    %% 7. OEM
     idx = contains([B7Mass.Name],"Fuel","IgnoreCase",true) | ...
           contains([B7Mass.Name],"Payload","IgnoreCase",true);
     ADP.OEM = sum([B7Mass(~idx).m]);
 
-    % Estimate MTOM
+    %% 8. MTOM update
     mtom = sum([B7Mass(1:end-2).m]) + ADP.TLAR.Payload + BlockFuel;
 
     delta = abs(ADP.MTOM - mtom);
     ADP.MTOM = mtom;
-end
 
+end
 % Store useful outputs
 out.BlockFuel   = BlockFuel;
 out.TripFuel    = TripFuel;
