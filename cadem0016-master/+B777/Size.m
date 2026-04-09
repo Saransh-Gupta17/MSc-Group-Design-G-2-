@@ -17,6 +17,13 @@ while delta > 1
     [BlockFuel, TripFuel, ResFuel, Mf_TOC, MissionTime, Mission, CriticalTW, CriticalWS] = ...
     B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
 
+    M_landing = ADP.MTOM - TripFuel;
+
+    ADP.Mf_TOC  = Mf_TOC;
+    ADP.Mf_Fuel = BlockFuel / ADP.MTOM;
+    ADP.Mf_res  = ResFuel / ADP.MTOM;
+    ADP.Mf_Ldg  = M_landing / ADP.MTOM;
+
     %Update Thrust/Weight Ratio and required wing loading
     %ADP.WingLoading = CriticalWS.Value;
     ADP.ThrustToWeightRatio = CriticalTW.Value;
