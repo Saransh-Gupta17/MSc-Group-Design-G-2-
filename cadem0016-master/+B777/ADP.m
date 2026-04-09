@@ -8,6 +8,7 @@ classdef ADP < handle
     properties
         TLAR
         Engine
+        EngineLocation
         AeroPolar
     end
 
