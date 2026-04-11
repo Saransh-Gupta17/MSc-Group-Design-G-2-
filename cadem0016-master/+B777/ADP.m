@@ -91,6 +91,16 @@ classdef ADP < handle
         Wing_M
         Wing_EI
         Wing_GJ
+
+        % Fuselage Outputs
+        Fus_x
+        Fus_M_vert
+        Fus_V_vert
+        Fus_T
+        Fus_t_req
+        Fus_EI
+        Fus_GJ
+        
     end
 
     % fuselage properties
