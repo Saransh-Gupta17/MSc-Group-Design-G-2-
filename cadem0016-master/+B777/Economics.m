@@ -38,13 +38,13 @@ function Econ = Economics(MTOM, Span, BlockFuel_kg, BlockTime_hr, ...
     LandingAnnual  = LandingFeeTrip * AnnualFlights;
 
     %% ---------------- Parking fees ----------------
-    if Span < 24
+    if Span < 34
         parking_rate = 0;
-    elseif Span < 36
+    elseif Span < 46
         parking_rate = 1000;
-    elseif Span < 52
+    elseif Span < 42
         parking_rate = 2000;
-    elseif Span < 65
+    elseif Span < 75
         parking_rate = 4000;
     else
         parking_rate = 6000;
