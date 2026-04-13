@@ -11,7 +11,7 @@ ADP.TLAR = cast.TLAR.B777F();   % top level aircraft requirements
 %% ------------------------- Hyper-parameters ----------------------------
 ADP.TLAR.M_c = 0.84;
 ADP.Fleet_size = 7;
-ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size; %NOT A HYPERPARAMTEER
+ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size; % NOT A HYPERPARAMETER
 
 ADP.AR = 9.5;
 ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
@@ -46,7 +46,10 @@ ADP = B777.Size(ADP);
 d = B7Mass.GetData;
 
 %% ------------------------- Mission analysis ----------------------------
-[BlockFuel, ~, ~, ~, BlockTime_hr] = B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
+[BlockFuel, TripFuel, ResFuel, Mf_TOC, MissionTime, Mission, CriticalTW, CriticalWS] = ...
+    B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
+
+BlockTime_hr = MissionTime / 3600;
 
 %% -------------------------- Cost analysis ------------------------------
 FuelType = 'JetA1';
@@ -56,7 +59,10 @@ AnnualUtilisationHr = ADP.TLAR.FlightHours;
 NumLandings         = 1;
 NumCycles           = 1;
 
-% Total investment placeholder:
+FleetSize      = ADP.Fleet_size;
+LifecycleYears = 20;
+
+% Placeholder acquisition cost model:
 % for now use hull value as a proxy until you build the initial cost model
 HullValue_guess = 44880 * ADP.MTOM^0.65;
 TotalInvestment = HullValue_guess;
@@ -72,38 +78,53 @@ Econ = B777.Economics( ...
     AnnualUtilisationHr, ...
     FlightsPerYear, ...
     TotalInvestment, ...
+    'FleetSize', FleetSize, ...
+    'LifecycleYears', LifecycleYears, ...
     'ParkingDaysPerYear', ADP.TLAR.ParkingDays, ...
     'NavChargePerFlight', 0, ...
     'UseImprovedMaint', false, ...
     'NumEngines', 2, ...
     'EngineCost', 0);
 
-% Per-aircraft extracted values
-HullValue      = Econ.breakdown.HullValue;
-FuelCost       = Econ.breakdown.FuelTrip;
-LandingFee     = Econ.breakdown.LandingFeeTrip;
-ParkingFee     = Econ.breakdown.ParkingTrip * FlightsPerYear;
-InsuranceCost  = Econ.breakdown.InsuranceAnnual;
-MaintFixed     = Econ.breakdown.MaintFixedAnnual;
-MaintVar       = Econ.breakdown.MaintVarAnnual;
+%% ---------------------- Per-aircraft outputs ---------------------------
+HullValue       = Econ.breakdown.HullValue;
+CrewCost        = Econ.breakdown.CrewAnnual;
+LandingFee      = Econ.breakdown.LandingFeeTrip;
+LandingAnnual   = Econ.breakdown.LandingAnnual;
+ParkingFee      = Econ.breakdown.ParkingAnnual;
+FuelCost        = Econ.breakdown.FuelTrip;
+FuelAnnual      = Econ.breakdown.FuelAnnual;
+MaintFixed      = Econ.breakdown.MaintFixedAnnual;
+MaintVar        = Econ.breakdown.MaintVarAnnual;
+MaintAnnual     = Econ.breakdown.MaintAnnual;
+InsuranceCost   = Econ.breakdown.InsuranceAnnual;
+NavigationCost  = Econ.breakdown.NavigationAnnual;
 
-CrewCost = (Econ.breakdown.CockpitCrewTrip + Econ.breakdown.CabinCrewTrip) ...
-           * FlightsPerYear;
+COC_Annual      = Econ.COC_annual;
+DOC_Annual      = Econ.DOC_annual;
 
-TotalCost = Econ.DOC_annual;
+%% ---------------------- Fleet annual outputs ---------------------------
+FleetCrewCost      = Econ.breakdown.FleetCrewAnnual;
+FleetLandingCost   = Econ.breakdown.FleetLandingAnnual;
+FleetParkingCost   = Econ.breakdown.FleetParkingAnnual;
+FleetFuelCost      = Econ.breakdown.FleetFuelAnnual;
+FleetHullValue     = FleetSize * HullValue;
+FleetMaintCost     = Econ.breakdown.FleetMaintAnnual;
+FleetInsuranceCost = Econ.breakdown.FleetInsuranceAnnual;
+FleetNavCost       = Econ.breakdown.FleetNavAnnual;
 
-% Fleet annual values
-FleetCrewCost      = ADP.Fleet_size * CrewCost;
-FleetLandingCost   = ADP.Fleet_size * LandingFee * FlightsPerYear;
-FleetParkingCost   = ADP.Fleet_size * ParkingFee;
-FleetFuelCost      = ADP.Fleet_size * FuelCost * FlightsPerYear;
-FleetHullValue     = ADP.Fleet_size * HullValue;
-FleetMaintFixed    = ADP.Fleet_size * MaintFixed;
-FleetMaintVar      = ADP.Fleet_size * MaintVar;
-FleetInsuranceCost = ADP.Fleet_size * InsuranceCost;
+FleetCapitalCost   = Econ.FleetCapitalCost;
+FleetTotalCOC      = Econ.FleetCOC_annual;
+FleetTotalDOC      = Econ.FleetDOC_annual;
 
-FleetTotalDOC = ADP.Fleet_size * Econ.DOC_annual;
-FleetTotalCOC = ADP.Fleet_size * Econ.COC_annual;
+%% ---------------------- Fleet lifecycle outputs ------------------------
+FleetOperatingCost20yr_COC = Econ.FleetCOC_20yr;
+FleetOperatingCost20yr_DOC = Econ.FleetDOC_20yr;
+FleetLifecycleCost20yr_COC = Econ.FleetLifecycleCostCOC;
+FleetLifecycleCost20yr_DOC = Econ.FleetLifecycleCostDOC;
+
+% Main optimization objective
+TotalCost = Econ.Objective;
 
 %% ----------------------------- Plotting --------------------------------
 f = figure(1);
@@ -133,6 +154,10 @@ fprintf('Payload per aircraft               : %8.1f t\n', ADP.TLAR.Payload/1e3);
 fprintf('Range                              : %8.1f km\n', ADP.TLAR.Range/1e3);
 fprintf('Cruise Mach                        : %8.3f\n', ADP.TLAR.M_c);
 fprintf('Aspect ratio                       : %8.3f\n', ADP.AR);
+fprintf('Cruise altitude                    : %8.1f m\n', ADP.cruise_altitude);
+fprintf('Flights per year                   : %8.1f\n', FlightsPerYear);
+fprintf('Annual utilisation                 : %8.1f hr/year\n', AnnualUtilisationHr);
+fprintf('Lifecycle                          : %8d years\n', LifecycleYears);
 
 fprintf('\n--- Main Geometry ------------------------------------------\n');
 fprintf('Fuselage total length              : %8.2f m\n', ADP.L_total);
@@ -142,10 +167,14 @@ fprintf('Wing span                          : %8.2f m\n', ADP.Span);
 fprintf('Wing position                      : %8.2f m\n', ADP.WingPos);
 fprintf('HTP position                       : %8.2f m\n', ADP.HtpPos);
 fprintf('VTP position                       : %8.2f m\n', ADP.VtpPos);
+
 fprintf('\n--- Mass / Fuel --------------------------------------------\n');
 fprintf('MTOM                               : %8.1f t\n', ADP.MTOM/1e3);
 fprintf('Estimated fuel mass                : %8.1f t\n', ADP.Mf_Fuel*ADP.MTOM/1e3);
+fprintf('Trip fuel                          : %8.1f t\n', TripFuel/1e3);
+fprintf('Reserve fuel                       : %8.1f t\n', ResFuel/1e3);
 fprintf('Block fuel per mission             : %8.1f t\n', BlockFuel/1e3);
+fprintf('Mission time                       : %8.2f hr\n', MissionTime/3600);
 
 % --- see all wing entries (please dont remove my code keeps breaking) ---
 wingIdxAll = contains(d(:,1), "Wing");
@@ -158,7 +187,7 @@ wingIdx = strcmp(d(:,1), "Wing_Structural");
 
 if any(wingIdx)
     wing_mass = str2double(d{wingIdx,2});
-    fprintf('Wing mass                          : %8.1f t\n', wing_mass);
+    fprintf('Wing mass                          : %8.1f t\n', wing_mass/1e3);
 else
     warning("Wing_Structural not found!")
 end
@@ -166,22 +195,29 @@ end
 fprintf('\n--- Aerodynamics -------------------------------------------\n');
 fprintf('CD0                                : %8.4f\n', ADP.AeroPolar.CD(0));
 fprintf('CD at CL = 0.5                     : %8.4f\n', ADP.AeroPolar.CD(0.5));
+fprintf('Mf_TOC (mission analysis)          : %8.4f\n', Mf_TOC);
 
 fprintf('\n--- Economics: Per Aircraft --------------------------------\n');
-fprintf('COC                                : %8.3f M$/yr\n', Econ.COC_annual/1e6);
-fprintf('DOC                                : %8.3f M$/yr\n', Econ.DOC_annual/1e6);
+fprintf('Investment / aircraft              : %8.3f M$\n', TotalInvestment/1e6);
+fprintf('Hull value                         : %8.3f M$\n', HullValue/1e6);
+fprintf('COC                                : %8.3f M$/yr\n', COC_Annual/1e6);
+fprintf('DOC                                : %8.3f M$/yr\n', DOC_Annual/1e6);
 fprintf('COC                                : %8.3f k$/flight\n', Econ.COC_trip/1e3);
 fprintf('DOC                                : %8.3f k$/flight\n', Econ.DOC_trip/1e3);
 fprintf('Crew cost                          : %8.3f M$/yr\n', CrewCost/1e6);
 fprintf('Landing fee                        : %8.3f k$/flight\n', LandingFee/1e3);
+fprintf('Landing fees                       : %8.3f M$/yr\n', LandingAnnual/1e6);
 fprintf('Parking fee                        : %8.3f M$/yr\n', ParkingFee/1e6);
 fprintf('Fuel cost                          : %8.3f k$/flight\n', FuelCost/1e3);
-fprintf('Hull value                         : %8.3f M$\n', HullValue/1e6);
+fprintf('Fuel cost                          : %8.3f M$/yr\n', FuelAnnual/1e6);
 fprintf('Fixed maintenance                  : %8.3f M$/yr\n', MaintFixed/1e6);
 fprintf('Variable maintenance               : %8.3f M$/yr\n', MaintVar/1e6);
+fprintf('Total maintenance                  : %8.3f M$/yr\n', MaintAnnual/1e6);
 fprintf('Insurance cost                     : %8.3f M$/yr\n', InsuranceCost/1e6);
+fprintf('Navigation cost                    : %8.3f M$/yr\n', NavigationCost/1e6);
 
 fprintf('\n--- Economics: Entire Fleet --------------------------------\n');
+fprintf('Fleet capital cost                 : %8.3f M$\n', FleetCapitalCost/1e6);
 fprintf('Fleet COC                          : %8.3f M$/yr\n', FleetTotalCOC/1e6);
 fprintf('Fleet DOC                          : %8.3f M$/yr\n', FleetTotalDOC/1e6);
 fprintf('Fleet crew cost                    : %8.3f M$/yr\n', FleetCrewCost/1e6);
@@ -189,48 +225,83 @@ fprintf('Fleet landing fees                 : %8.3f M$/yr\n', FleetLandingCost/1
 fprintf('Fleet parking fees                 : %8.3f M$/yr\n', FleetParkingCost/1e6);
 fprintf('Fleet fuel cost                    : %8.3f M$/yr\n', FleetFuelCost/1e6);
 fprintf('Fleet hull value                   : %8.3f M$\n', FleetHullValue/1e6);
-fprintf('Fleet fixed maintenance            : %8.3f M$/yr\n', FleetMaintFixed/1e6);
-fprintf('Fleet variable maintenance         : %8.3f M$/yr\n', FleetMaintVar/1e6);
+fprintf('Fleet maintenance                  : %8.3f M$/yr\n', FleetMaintCost/1e6);
 fprintf('Fleet insurance cost               : %8.3f M$/yr\n', FleetInsuranceCost/1e6);
+fprintf('Fleet navigation cost              : %8.3f M$/yr\n', FleetNavCost/1e6);
 
-%% ---------------------- Optional summary tables ------------------------
+fprintf('\n--- Economics: 20-Year Lifecycle ---------------------------\n');
+fprintf('Fleet operating cost (COC, 20 yr)  : %8.3f M$\n', FleetOperatingCost20yr_COC/1e6);
+fprintf('Fleet operating cost (DOC, 20 yr)  : %8.3f M$\n', FleetOperatingCost20yr_DOC/1e6);
+fprintf('Fleet lifecycle cost (COC, 20 yr)  : %8.3f M$\n', FleetLifecycleCost20yr_COC/1e6);
+fprintf('Fleet lifecycle cost (DOC, 20 yr)  : %8.3f M$\n', FleetLifecycleCost20yr_DOC/1e6);
+fprintf('Optimization objective             : %8.3f M$\n', TotalCost/1e6);
+
+%% ---------------------- Cost summary table -----------------------------
 CostNames = { ...
     'Crew Cost / aircraft / year'
     'Landing Fee / aircraft / flight'
+    'Landing Fees / aircraft / year'
     'Parking Fee / aircraft / year'
     'Fuel Cost / aircraft / flight'
+    'Fuel Cost / aircraft / year'
     'Hull Value / aircraft'
+    'Investment / aircraft'
     'Maint. Fixed / aircraft / year'
     'Maint. Variable / aircraft / year'
+    'Maint. Total / aircraft / year'
     'Insurance / aircraft / year'
+    'Navigation / aircraft / year'
+    'COC / aircraft / year'
+    'DOC / aircraft / year'
     'Fleet Crew Cost / year'
     'Fleet Landing Fees / year'
     'Fleet Parking Fees / year'
     'Fleet Fuel Cost / year'
     'Fleet Hull Value'
-    'Fleet Maint. Fixed / year'
-    'Fleet Maint. Variable / year'
+    'Fleet Maintenance / year'
     'Fleet Insurance / year'
-    'Fleet Total DOC / year'};
+    'Fleet Navigation / year'
+    'Fleet Total COC / year'
+    'Fleet Total DOC / year'
+    'Fleet Capital Cost'
+    'Fleet Operating Cost / 20 yr (COC)'
+    'Fleet Operating Cost / 20 yr (DOC)'
+    'Fleet Lifecycle Cost / 20 yr (COC)'
+    'Fleet Lifecycle Cost / 20 yr (DOC)'
+    'Optimization Objective'};
 
 CostValues_MUSD = [ ...
     CrewCost
     LandingFee
+    LandingAnnual
     ParkingFee
     FuelCost
+    FuelAnnual
     HullValue
+    TotalInvestment
     MaintFixed
     MaintVar
+    MaintAnnual
     InsuranceCost
+    NavigationCost
+    COC_Annual
+    DOC_Annual
     FleetCrewCost
     FleetLandingCost
     FleetParkingCost
     FleetFuelCost
     FleetHullValue
-    FleetMaintFixed
-    FleetMaintVar
+    FleetMaintCost
     FleetInsuranceCost
-    FleetTotalDOC] / 1e6;
+    FleetNavCost
+    FleetTotalCOC
+    FleetTotalDOC
+    FleetCapitalCost
+    FleetOperatingCost20yr_COC
+    FleetOperatingCost20yr_DOC
+    FleetLifecycleCost20yr_COC
+    FleetLifecycleCost20yr_DOC
+    TotalCost] / 1e6;
 
 CostSummary = table(CostNames, CostValues_MUSD, ...
     'VariableNames', {'Cost_Item', 'Value_MUSD'});
@@ -239,10 +310,10 @@ disp(' ');
 disp('Cost Summary Table:');
 disp(CostSummary);
 
+%% ---------------------- Engine properties ------------------------------
 fprintf('\n--- Engine Properties --------------------------------------\n');
 
 eng = ADP.Engine;
-
 props = properties(eng);
 
 for i = 1:length(props)
@@ -250,20 +321,14 @@ for i = 1:length(props)
 
     if isnumeric(val) && isscalar(val)
         fprintf('%-30s : %g\n', props{i}, val);
-
     elseif isnumeric(val) && ~isscalar(val)
         fprintf('%-30s : [%s]\n', props{i}, num2str(val));
-
     elseif ischar(val) || isstring(val)
-        fprintf('%-30s : %s\n', props{i}, val);
-
+        fprintf('%-30s : %s\n', props{i}, string(val));
     else
         fprintf('%-30s : [non-displayable type]\n', props{i});
     end
 end
-
-[BlockFuel, TripFuel, ResFuel, Mf_TOC, MissionTime, Mission, CriticalTW, CriticalWS] = ...
-    B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
 
 %% ============================================================
 %% 21) Detailed mission printout
