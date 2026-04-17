@@ -9,14 +9,14 @@ ADP = B777.ADP();
 ADP.TLAR = cast.TLAR.B777F();   % top level aircraft requirements
 
 %% ------------------------- Hyper-parameters ----------------------------
-ADP.TLAR.M_c = 0.84;
-ADP.Fleet_size = 7;
+ADP.TLAR.M_c = 0.845;
+ADP.Fleet_size = 8;
 ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size; % NOT A HYPERPARAMETER
 
-ADP.AR = 9.5;
+ADP.AR = 8;
 ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
-ADP.WingLoading = 9000;
-ADP.cruise_altitude = 12000;
+ADP.WingLoading = 7000;
+ADP.cruise_altitude = 11626;
 
 %% ---------------------- Geometric parameters ---------------------------
 ADP.KinkPos = 10;   % spanwise position of TE kink in wing planform
@@ -397,7 +397,7 @@ printVerticalSegmentRow('Descent1', Mission.Descent1);
 printVerticalSegmentRow('Descent2', Mission.Descent2);
 printVerticalSegmentRow('Descent3', Mission.Descent3);
 
-printRow('ApproachLanding', Mission.ApproachLanding, 1500*0.3048, 0, ...
+printRow('ApproachLanding', Mission.ApproachLanding, 1500 / SI.ft, 0, ...
     sprintf('%.1f m/s', getFieldOr(Mission.ApproachLanding,'V',NaN)), ...
     getFieldOr(Mission.ApproachLanding,'Treq',NaN)/1000, ...
     getFieldOr(Mission.ApproachLanding,'CL',NaN));
@@ -407,34 +407,72 @@ printVerticalSegmentRow('AltClimb', Mission.Alternate.Climb);
 printCruiseSegmentRow('AltCruise', Mission.Alternate.Cruise);
 printVerticalSegmentRow('AltDescent', Mission.Alternate.Descent);
 
-printRow('AltApproach', Mission.Alternate.Approach, 0, 0, 'M 0.20', ...
-    getFieldOr(Mission.Alternate.Approach,'Treq',NaN)/1000, ...
-    getFieldOr(Mission.Alternate.Approach,'CL',NaN));
-
-printRow('Loiter', Mission.Loiter, 1500*0.3048, 1500*0.3048, ...
-    sprintf('M %.2f', estimateMachFromLoiter(Mission.Loiter)), ...
+printRow('Loiter', Mission.Loiter, 1500 / SI.ft, 1500 / SI.ft, ...
+    loiterSpeedString(Mission.Loiter), ...
     getFieldOr(Mission.Loiter,'Treq',NaN)/1000, ...
     getFieldOr(Mission.Loiter,'CL',NaN));
 
-printRow('Contingency', Mission.Contingency, 1500*0.3048, 1500*0.3048, '-', ...
-    getFieldOr(Mission.Contingency,'Treq',NaN)/1000, ...
-    getFieldOr(Mission.Contingency,'CL',NaN));
+printVerticalSegmentRow('AltApprDescent', Mission.Alternate.ApproachDescent);
+
+printRow('AltApproach', Mission.Alternate.Approach, 0, 0, ...
+    sprintf('%.1f m/s', getFieldOr(Mission.Alternate.Approach,'V',NaN)), ...
+    getFieldOr(Mission.Alternate.Approach,'Treq',NaN)/1000, ...
+    getFieldOr(Mission.Alternate.Approach,'CL',NaN));
 
 fprintf('%s\n', repmat('-',1,135));
-fprintf('Trip fuel                 = %.1f kg\n', Mission.Total.TripFuel);
-fprintf('Reserve fuel              = %.1f kg\n', Mission.Total.ResFuel);
-fprintf('Block fuel                = %.1f kg\n', Mission.Total.BlockFuel);
 
-if isfield(Mission.Total,'AirborneDesignMissionTime')
-    fprintf('Airborne design time      = %.2f hr\n', Mission.Total.AirborneDesignMissionTime/3600);
+TripFuel_rep  = getNestedFieldOr(Mission, {'Total','TripFuel'}, NaN);
+ResFuel_rep   = getNestedFieldOr(Mission, {'Total','ResFuel'}, NaN);
+BlockFuel_rep = getNestedFieldOr(Mission, {'Total','BlockFuel'}, NaN);
+
+if isnan(TripFuel_rep)
+    TripFuel_rep = getFieldOr(Mission.TaxiOut,'Fuel',0) + ...
+                   getFieldOr(Mission.TakeoffGround,'Fuel',0) + ...
+                   getFieldOr(Mission.InitialClimb,'Fuel',0) + ...
+                   getFieldOr(Mission.Climb1,'Fuel',0) + ...
+                   getFieldOr(Mission.Climb2,'Fuel',0) + ...
+                   getFieldOr(Mission.Climb3,'Fuel',0) + ...
+                   getFieldOr(Mission.Cruise,'Fuel',0) + ...
+                   getFieldOr(Mission.Descent1,'Fuel',0) + ...
+                   getFieldOr(Mission.Descent2,'Fuel',0) + ...
+                   getFieldOr(Mission.Descent3,'Fuel',0) + ...
+                   getFieldOr(Mission.ApproachLanding,'Fuel',0);
 end
-if isfield(Mission.Total,'DesignMissionTime')
-    fprintf('Design mission time       = %.2f hr\n', Mission.Total.DesignMissionTime/3600);
+
+if isnan(ResFuel_rep)
+    ResFuel_rep = getFieldOr(Mission.Alternate.Climb,'Fuel',0) + ...
+                  getFieldOr(Mission.Alternate.Cruise,'Fuel',0) + ...
+                  getFieldOr(Mission.Alternate.Descent,'Fuel',0) + ...
+                  getFieldOr(Mission.Loiter,'Fuel',0) + ...
+                  getFieldOr(Mission.Alternate.ApproachDescent,'Fuel',0) + ...
+                  getFieldOr(Mission.Alternate.Approach,'Fuel',0) + ...
+                  getNestedFieldOr(Mission, {'Total','ContingencyFuel'}, 0);
 end
-if isfield(Mission.Total,'TotalMissionTime')
-    fprintf('Total mission time        = %.2f hr\n', Mission.Total.TotalMissionTime/3600);
-elseif isfield(Mission.Total,'Time')
-    fprintf('Total mission time        = %.2f hr\n', Mission.Total.Time/3600);
+
+if isnan(BlockFuel_rep)
+    BlockFuel_rep = TripFuel_rep + ResFuel_rep;
+end
+
+fprintf('Trip fuel                 = %.1f kg\n', TripFuel_rep);
+fprintf('Reserve fuel              = %.1f kg\n', ResFuel_rep);
+fprintf('Block fuel                = %.1f kg\n', BlockFuel_rep);
+
+AirborneTime_rep = getNestedFieldOr(Mission, {'Total','AirborneDesignMissionTime'}, NaN);
+DesignTime_rep   = getNestedFieldOr(Mission, {'Total','DesignMissionTime'}, NaN);
+TotalTime_rep    = getNestedFieldOr(Mission, {'Total','TotalMissionTime'}, NaN);
+
+if ~isnan(AirborneTime_rep)
+    fprintf('Airborne design time      = %.2f hr\n', AirborneTime_rep/3600);
+end
+if ~isnan(DesignTime_rep)
+    fprintf('Design mission time       = %.2f hr\n', DesignTime_rep/3600);
+end
+if ~isnan(TotalTime_rep)
+    fprintf('Total mission time        = %.2f hr\n', TotalTime_rep/3600);
+end
+
+if isfield(Mission,'Total') && isfield(Mission.Total,'ContingencyFuel')
+    fprintf('Contingency fuel carried  = %.1f kg\n', Mission.Total.ContingencyFuel);
 end
 
 fprintf('========================================================================================================\n');
@@ -444,27 +482,31 @@ fprintf('=======================================================================
         h2 = NaN;
         speedStr = '-';
 
-        if isfield(seg,'StepAlt') && ~isempty(seg.StepAlt)
+        if isfield(seg,'StartAltitude') && isfield(seg,'EndAltitude')
+            h1 = seg.StartAltitude;
+            h2 = seg.EndAltitude;
+        elseif isfield(seg,'StepAlt') && ~isempty(seg.StepAlt)
             if numel(seg.StepAlt) == 1
                 h1 = seg.StepAlt(1);
                 h2 = seg.StepAlt(1);
             else
-                dh = mean(diff(seg.StepAlt), 'omitnan');
-                h1 = seg.StepAlt(1) - abs(dh)/2;
-                h2 = seg.StepAlt(end) + abs(dh)/2;
+                dh = mean(abs(diff(seg.StepAlt)), 'omitnan');
+                if isempty(dh) || isnan(dh), dh = 0; end
 
-                if contains(name,'Descent')
-                    tmp = h1;
-                    h1 = h2;
-                    h2 = tmp;
+                if seg.StepAlt(end) >= seg.StepAlt(1)
+                    h1 = seg.StepAlt(1) - dh/2;
+                    h2 = seg.StepAlt(end) + dh/2;
+                else
+                    h1 = seg.StepAlt(1) + dh/2;
+                    h2 = seg.StepAlt(end) - dh/2;
                 end
             end
         end
 
-        if isfield(seg,'StepV') && ~isempty(seg.StepV)
-            speedStr = sprintf('%.1f m/s', mean(seg.StepV,'omitnan'));
-        elseif isfield(seg,'StepMach') && ~isempty(seg.StepMach)
+        if isfield(seg,'StepMach') && ~isempty(seg.StepMach)
             speedStr = sprintf('M %.2f', mean(seg.StepMach,'omitnan'));
+        elseif isfield(seg,'StepV') && ~isempty(seg.StepV)
+            speedStr = sprintf('%.1f m/s', mean(seg.StepV,'omitnan'));
         end
 
         Thrust_seg = NaN;
@@ -486,13 +528,8 @@ fprintf('=======================================================================
     end
 
     function printCruiseSegmentRow(name, seg)
-        h1 = getFieldOr(seg,'Altitude',NaN);
-        h2 = NaN;
-
-        if isfield(seg,'StepAlt') && ~isempty(seg.StepAlt)
-            h1 = seg.StepAlt(1);
-            h2 = seg.StepAlt(end);
-        end
+        h1 = getFieldOr(seg,'StartAltitude', getFieldOr(seg,'Altitude',NaN));
+        h2 = getFieldOr(seg,'EndAltitude', NaN);
 
         if isfield(seg,'StepMach') && ~isempty(seg.StepMach)
             speedStr = sprintf('M %.3f', mean(seg.StepMach,'omitnan'));
@@ -522,29 +559,47 @@ end
 
 function plotMissionHistory(Mission, M_TO)
 
-[t_hist, h_hist, m_hist, labels] = buildMissionHistory(Mission, M_TO);
+[t_hist, h_hist, m_hist, ~] = buildMissionHistory(Mission, M_TO);
 
 figure(12); clf;
 tiledlayout(2,1)
 
 nexttile
-plot(t_hist/60, h_hist, 'LineWidth', 1.5)
+plot(t_hist/60, h_hist, 'LineWidth', 1.8)
 xlabel('Cumulative time (min)')
 ylabel('Altitude (m)')
-title('Mission altitude history')
-grid on
-hold on
-for i = 1:numel(labels)
-    xline(labels(i).time_s/60, '--');
-end
+title('Mission Altitude History')
+grid off
 
 nexttile
-plot(t_hist/60, m_hist, 'LineWidth', 1.5)
+plot(t_hist/60, m_hist, 'LineWidth', 1.8)
 xlabel('Cumulative time (min)')
 ylabel('Aircraft mass (kg)')
-title('Mission mass history')
-grid on
+title('Mission Mass History')
+grid off
 
+end
+
+%% ---------------- Mass history ----------------
+nexttile
+plot(t_hist/60, m_hist, 'LineWidth', 1.8)
+xlabel('Cumulative time (min)')
+ylabel('Aircraft mass (kg)')
+title('Mission Mass History')
+grid on
+hold on
+
+for i = 1:numel(labels)
+    x_lab = labels(i).time_s / 60;
+
+    [~, idx] = min(abs(t_hist/60 - x_lab));
+    y_lab = m_hist(idx);
+
+    text(x_lab, y_lab, ['  ' labels(i).name], ...
+        'FontSize', 8, ...
+        'Rotation', 0, ...
+        'VerticalAlignment', 'bottom', ...
+        'Interpreter', 'none');
 end
 
 function [t_hist, h_hist, m_hist, labels] = buildMissionHistory(Mission, M_TO)
@@ -620,16 +675,16 @@ addStepSegment('Descent1', Mission.Descent1);
 addStepSegment('Descent2', Mission.Descent2);
 addStepSegment('Descent3', Mission.Descent3);
 
-addSimpleSegment('ApproachLanding', Mission.ApproachLanding, 1500/SI.ft, 0);
+addSimpleSegment('ApproachLanding', Mission.ApproachLanding, 1500 / SI.ft, 0);
 addSimpleSegment('TaxiIn', struct('Time',20*60,'Fuel',0), 0, 0);
 
 addStepSegment('AltClimb', Mission.Alternate.Climb);
 addStepSegment('AltCruise', Mission.Alternate.Cruise);
 addStepSegment('AltDescent', Mission.Alternate.Descent);
-
+addSimpleSegment('Loiter', Mission.Loiter, 1500 / SI.ft, 1500 / SI.ft);
+addStepSegment('AltApprDescent', Mission.Alternate.ApproachDescent);
 addSimpleSegment('AltApproach', Mission.Alternate.Approach, 0, 0);
-addSimpleSegment('Loiter', Mission.Loiter, 1500/SI.ft, 1500/SI.ft);
-addSimpleSegment('Contingency', Mission.Contingency, 1500/SI.ft, 1500/SI.ft);
+addSimpleSegment('TaxiInFinal', struct('Time',20*60,'Fuel',0), 0, 0);
 
 end
 
@@ -641,6 +696,37 @@ else
 end
 end
 
-function M = estimateMachFromLoiter(~)
-M = NaN;
+function val = getNestedFieldOr(S, fieldPath, fallback)
+val = fallback;
+
+try
+    current = S;
+    for k = 1:numel(fieldPath)
+        if isstruct(current) && isfield(current, fieldPath{k})
+            current = current.(fieldPath{k});
+        else
+            return
+        end
+    end
+
+    if ~isempty(current)
+        val = current;
+    end
+catch
+    val = fallback;
+end
+end
+
+function M = estimateMachFromLoiter(seg)
+M = getFieldOr(seg, 'Mach', NaN);
+end
+
+function s = loiterSpeedString(seg)
+if isfield(seg,'V') && ~isempty(seg.V) && ~isnan(seg.V)
+    s = sprintf('%.1f m/s', seg.V);
+elseif isfield(seg,'Mach') && ~isempty(seg.Mach) && ~isnan(seg.Mach)
+    s = sprintf('M %.2f', seg.Mach);
+else
+    s = '-';
+end
 end
