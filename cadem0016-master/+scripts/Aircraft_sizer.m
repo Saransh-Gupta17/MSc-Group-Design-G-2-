@@ -15,12 +15,12 @@ ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size; %NOT A HYPERPARAMTEER
 
 ADP.AR = 9.5;
 ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
-ADP.WingLoading = 7000;
+
 ADP.cruise_altitude = 12000;
 
 %% ---------------------- Geometric parameters ---------------------------
 ADP.KinkPos = 10;   % spanwise position of TE kink in wing planform
-
+ADP.WingLoading = 7000;
 [ADP.CabinLength, ADP.CabinRadius, ADP.L_total] = ...
     B777.geom.fuselage_sizer(ADP.Fleet_size, ADP.Pallet_size, ...
                              ADP.CockpitLength, ADP.D_max);
