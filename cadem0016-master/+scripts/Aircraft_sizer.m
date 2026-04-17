@@ -15,7 +15,7 @@ ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size; %NOT A HYPERPARAMTEER
 
 ADP.AR = 9.5;
 ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
-ADP.WingLoading = 9000;
+ADP.WingLoading = 7000;
 ADP.cruise_altitude = 12000;
 
 %% ---------------------- Geometric parameters ---------------------------
