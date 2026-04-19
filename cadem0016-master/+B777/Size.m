@@ -7,7 +7,7 @@ B777.ConstraintAnalysis(ADP);
 while delta > 1
 
     %% 1. ENGINE MODEL 
-    engine = cast.eng.TurboFan.GE90();
+    engine = cast.eng.TurboFan.GE90(1,ADP.cruise_altitude,ADP.TLAR.M_c);
 
     if ADP.isSizeEng
         engine = engine.Rubberise(ADP.Thrust);

@@ -58,9 +58,9 @@ classdef TurboFan
         
         function obj = CFM_LEAP_1A(sfc_scaling,alt_cruise,M_cruise)
             arguments
-                sfc_scaling = 1;
-                alt_cruise = 32e3 ./ SI.ft
-                M_cruise = 0.78
+                sfc_scaling 
+                alt_cruise 
+                M_cruise 
             end
             %CFM_LEAP_1A SData for CFM LEAP-1A
             %   https://www.easa.europa.eu/en/downloads/20086/en
@@ -72,14 +72,14 @@ classdef TurboFan
         end
         function obj = GE90(sfc_scaling,alt_cruise,M_cruise)
             arguments
-                sfc_scaling = 1;
-                alt_cruise = 32e3 ./ SI.ft
-                M_cruise = 0.84
+                sfc_scaling 
+                alt_cruise
+                M_cruise
             end
             %CFM_LEAP_1A SData for CFM LEAP-1A
             %   https://www.easa.europa.eu/en/downloads/20086/en
             f = 1./(SI.lb/(SI.lbf*SI.hr)) * sfc_scaling; % to convert SFC from imperial to SI.
-            BPR = 8.5;
+            BPR = 10;
             SFC_T0 = 19*exp(-0.12*BPR)*1e-6 * sfc_scaling; % from Aircraft Design: A Conceptual Approach, Raymer, 5th Ed. eq.10.7
             SFC_cruise = 25*exp(-0.05*BPR)*1e-6 * sfc_scaling; % from Aircraft Design: A Conceptual Approach, Raymer, 5th Ed. eq.10.9 (very close to value on wikipedia)
             obj = cast.eng.TurboFan(513e3,7.28,3.85,8762,SFC_T0,SFC_cruise,BPR,alt_cruise,M_cruise);

@@ -46,7 +46,7 @@ ADP = B777.Size(ADP);
 d = B7Mass.GetData;
 
 %% ------------------------- Mission analysis ----------------------------
-[BlockFuel, ~, ~, ~, BlockTime_hr] = B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
+[BlockFuel, ~, ~, ~, BlockTime_hr,Mission] = B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
 
 %% -------------------------- Cost analysis ------------------------------
 FuelType = 'JetA1';
@@ -104,6 +104,12 @@ FleetInsuranceCost = ADP.Fleet_size * InsuranceCost;
 
 FleetTotalDOC = ADP.Fleet_size * Econ.DOC_annual;
 FleetTotalCOC = ADP.Fleet_size * Econ.COC_annual;
+
+%% Climate Impact model
+cm     = cast.ClimateModel.fromMissionAnalysis(BlockFuel, ADP.TLAR.Range, BlockTime_hr,Mission);
+result = cm.computeImpact();
+atr    = cm.computeATR(result);
+cm.plotEmissions(result);
 
 %% ----------------------------- Plotting --------------------------------
 f = figure(1);
