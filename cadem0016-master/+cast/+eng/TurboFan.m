@@ -65,7 +65,7 @@ classdef TurboFan
             %CFM_LEAP_1A SData for CFM LEAP-1A
             %   https://www.easa.europa.eu/en/downloads/20086/en
             f = 1./(SI.lb/(SI.lbf*SI.hr)) * sfc_scaling; % to convert SFC from imperial to SI.
-            BPR = 11;
+            BPR = 10;
             SFC_T0 = 19*exp(-0.12*BPR)*1e-6 * sfc_scaling; % from Aircraft Design: A Conceptual Approach, Raymer, 5th Ed. eq.10.7
             SFC_cruise = 25*exp(-0.05*BPR)*1e-6 * sfc_scaling; % from Aircraft Design: A Conceptual Approach, Raymer, 5th Ed. eq.10.9 (very close to value on wikipedia)
             obj = cast.eng.TurboFan(143050,3.328,2.4,3008,SFC_T0,SFC_cruise,BPR,alt_cruise,M_cruise);
