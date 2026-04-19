@@ -108,19 +108,17 @@ Mission.TakeoffGround.WS     = TOGround.WingLoading;
 %% ============================================================
 %% 2B) Initial climb to 1500 ft
 %% ============================================================
-h_end = 1500 * 0.3048;   % ft to m
+h_end = 1500 * 0.3048;      % ft to m
 V_climb = 250 * 0.514444;   % 250 kt in m/s
 W = m_current * g;
 
 [rho_climb, a_climb, ~, ~] = cast.atmos(h_end/2);
 
 CL_climb = W / (0.5 * rho_climb * V_climb^2 * ADP.WingArea);
-CD_climb = ADP.AeroPolar.CD(CL_climb);
+CD_climb = aeroCD(ADP, CL_climb, V_climb, h_end/2);
 D_climb  = 0.5 * rho_climb * V_climb^2 * ADP.WingArea * CD_climb;
 
-% Use a fixed, reasonable initial climb rate instead of forcing
-% the aircraft to reach 1500 ft within a remaining time budget.
-ROC_initial = 12.0;   % m/s  (~2360 ft/min), reasonable first-pass value
+ROC_initial = 12.0;   % m/s
 
 t_climb = h_end / ROC_initial;
 
@@ -198,7 +196,7 @@ V_boc = M_boc * a_boc;
 W_boc = m_boc * g;
 
 CL_boc = W_boc / (0.5 * rho_boc * V_boc^2 * ADP.WingArea);
-CD_boc = ADP.AeroPolar.CD(CL_boc);
+CD_boc = aeroCD(ADP, CL_boc, V_boc, h_boc);
 D_boc  = 0.5 * rho_boc * V_boc^2 * ADP.WingArea * CD_boc;
 LD_boc = CL_boc / CD_boc;
 
@@ -290,7 +288,7 @@ Mach_app = V_app / a_app;
 W = m_current * g;
 
 CL_app = W / (0.5 * rho_app * V_app^2 * ADP.WingArea);
-CD_app = ADP.AeroPolar.CD(CL_app);
+CD_app = aeroCD(ADP, CL_app, V_app, alt_app);
 D_app  = 0.5 * rho_app * V_app^2 * ADP.WingArea * CD_app;
 
 T_idle = getIdleThrust(ADP, m_current, Mach_app, alt_app, IdleFrac);
@@ -354,18 +352,19 @@ Mission.Alternate.Approach.Range = 0;
 %% 15) Loiter at 1500 ft for 30 min at min drag velocity
 %% ============================================================
 alt_loiter = 1500 / SI.ft;
-[rho_l, a_l, ~, ~] = cast.atmos(alt_loiter);
+[rho_l, ~, ~, ~] = cast.atmos(alt_loiter);
 
 Cls = 0.2:0.01:2.5;
-LDs = Cls ./ ADP.AeroPolar.CD(Cls);
+[CDs_loiter, LDs, Vs_loiter, Machs_loiter] = loiterSweep(ADP, m_current, alt_loiter, Cls);
+
 [~, idxL] = max(LDs);
 
 CL_loiter = Cls(idxL);
-CD_loiter = ADP.AeroPolar.CD(CL_loiter);
-LD_loiter = CL_loiter / CD_loiter;
+CD_loiter = CDs_loiter(idxL);
+LD_loiter = LDs(idxL);
+V_loiter  = Vs_loiter(idxL);
+M_loiter  = Machs_loiter(idxL);
 
-V_loiter = sqrt((2 * m_current * g) / (rho_l * ADP.WingArea * CL_loiter));
-M_loiter = V_loiter / a_l;
 D_loiter = 0.5 * rho_l * V_loiter^2 * ADP.WingArea * CD_loiter;
 [LoiterTW, LoiterWS] = thrustToWeightAndWingLoading(D_loiter, m_current, ADP.WingArea, g);
 
@@ -467,7 +466,6 @@ wsVals  = [];
 wsAlts  = [];
 wsMachs = [];
 
-% ---------- T/W sizing cases ----------
 [twNames, twVals, twAlts, twMachs] = addCase(twNames, twVals, twAlts, twMachs, ...
     'TakeoffGround', Mission.TakeoffGround.TW, 0, 0);
 
@@ -491,7 +489,7 @@ wsMachs = [];
     Mission.CruiseStudy.CruiseClimbRequirement.Mach);
 
 [twNames, twVals, twAlts, twMachs] = addCase(twNames, twVals, twAlts, twMachs, ...
-    'Approach', Mission.ApproachLanding.TW, 0, Mach_app);
+    'Approach', Mission.ApproachLanding.TW, 0, Mission.ApproachLanding.V / cast.atmos(0));
 
 [twNames, twVals, twAlts, twMachs] = addMaxStepCase(twNames, twVals, twAlts, twMachs, ...
     'AltClimb', Mission.Alternate.Climb.StepTW, Mission.Alternate.Climb.StepAlt, Mission.Alternate.Climb.StepMach);
@@ -499,7 +497,6 @@ wsMachs = [];
 [twNames, twVals, twAlts, twMachs] = addCase(twNames, twVals, twAlts, twMachs, ...
     'Loiter', Mission.Loiter.TW, alt_loiter, M_loiter);
 
-% ---------- W/S sizing cases ----------
 [wsNames, wsVals, wsAlts, wsMachs] = addCase(wsNames, wsVals, wsAlts, wsMachs, ...
     'TakeoffGround', Mission.TakeoffGround.WS, 0, 0);
 
@@ -520,7 +517,7 @@ wsMachs = [];
     Mission.CruiseStudy.CruiseClimbRequirement.Mach);
 
 [wsNames, wsVals, wsAlts, wsMachs] = addCase(wsNames, wsVals, wsAlts, wsMachs, ...
-    'Approach', Mission.ApproachLanding.WS, 0, Mach_app);
+    'Approach', Mission.ApproachLanding.WS, 0, Mission.ApproachLanding.V / cast.atmos(0));
 
 [twMax, iTW] = max(twVals);
 [wsMax, iWS] = max(wsVals);
@@ -632,7 +629,7 @@ for i = 1:nSteps
     W = m_current * g;
 
     CL = W / (0.5 * rho * V^2 * ADP.WingArea);
-    CD = ADP.AeroPolar.CD(CL);
+    CD = aeroCD(ADP, CL, V, h_mid);
     D  = 0.5 * rho * V^2 * ADP.WingArea * CD;
 
     T_raw = D + W * roc / V;
@@ -708,10 +705,10 @@ TimeTot = 0;
 RangeActual = 0;
 alt_step = h_start;
 
-[rho0, a0, ~, ~] = cast.atmos(alt_step);
+[rho0_c, a0, ~, ~] = cast.atmos(alt_step); %#ok<ASGLU>
 V0 = Mach * a0;
 W0 = m_current * g;
-CL_target = W0 / (0.5 * rho0 * V0^2 * ADP.WingArea);
+CL_target = W0 / (0.5 * rho0_c * V0^2 * ADP.WingArea);
 
 for i = 1:nSteps
     dR_step = min(dR, rangeTarget - RangeActual);
@@ -725,7 +722,7 @@ for i = 1:nSteps
     W = m_current * g;
 
     CL = W / (0.5 * rho * V^2 * ADP.WingArea);
-    CD = ADP.AeroPolar.CD(CL);
+    CD = aeroCD(ADP, CL, V, alt_step);
     D  = 0.5 * rho * V^2 * ADP.WingArea * CD;
     LD = CL / CD;
     T_req = D;
@@ -772,8 +769,8 @@ Seg.Range = RangeActual;
 Seg.Altitude = h_start;
 Seg.FL = round(h_start * SI.ft / 100, 0);
 Seg.CL = CL_target;
-Seg.CD = ADP.AeroPolar.CD(CL_target);
-Seg.LD = CL_target / ADP.AeroPolar.CD(CL_target);
+Seg.CD = aeroCD(ADP, CL_target, V0, h_start);
+Seg.LD = CL_target / Seg.CD;
 Seg.MaxTW = maxOrNaN(Seg.StepTW);
 Seg.MaxWS = maxOrNaN(Seg.StepWS);
 Seg.Name = segName;
@@ -876,8 +873,6 @@ end
 end
 
 function [TW_required, T_required, out] = sizeTakeoffFromFieldLength(ADP, m_current, TakeoffFieldLength, varargin)
-% sizeTakeoffFromFieldLength
-%
 % Preliminary ground-roll takeoff sizing from a required takeoff field length.
 
 p = inputParser;
@@ -920,11 +915,11 @@ Vavg      = opt.VavgFactor * Vlof;
 q_avg = 0.5 * rho_to * Vavg^2;
 
 try
-    CDg = ADP.AeroPolar.CD(CLg);
+    CDg = aeroCD(ADP, CLg, Vavg, opt.Altitude);
 catch
     error('sizeTakeoffFromFieldLength:AeroPolarCallFailed', ...
-        ['Could not evaluate ADP.AeroPolar.CD(CLg). Make sure ', ...
-         'ADP.AeroPolar.CD accepts a CL input and returns CD.']);
+        ['Could not evaluate updated AeroPolar drag. Make sure ', ...
+         'AeroPolar accepts the current flight condition.']);
 end
 
 L_avg = q_avg * S * CLg;
@@ -981,4 +976,56 @@ out.T_required         = T_required;
 
 out.EstimatedGroundRollTime = Vlof / a_avg;
 out.EstimatedRange          = TakeoffFieldLength;
+end
+
+%% ======================= AeroPolar wrappers ===========================
+
+function CD = aeroCD(ADP, CL, V, alt_m)
+[rho, a, T, ~] = cast.atmos(alt_m);
+
+V = max(V, 1.0);
+mu = sutherlandMu(T);
+
+try
+    polar = B777.AeroPolar(ADP, rho, mu, V);
+catch
+    polar = B777.AeroPolar(ADP);
+    polar.Mach = V / a;
+end
+
+try
+    polar.Mach = V / a;
+catch
+end
+
+CD = polar.CD(CL);
+end
+
+function mu = sutherlandMu(T)
+T0 = 273.15;
+mu0 = 1.716e-5;
+S = 110.4;
+mu = mu0 * (T / T0).^(3/2) .* ((T0 + S) ./ (T + S));
+end
+
+function [CDs, LDs, Vs, Machs] = loiterSweep(ADP, mass_kg, alt_m, CLs)
+g = 9.81;
+[rho, a, ~, ~] = cast.atmos(alt_m);
+
+n = numel(CLs);
+CDs   = zeros(size(CLs));
+LDs   = zeros(size(CLs));
+Vs    = zeros(size(CLs));
+Machs = zeros(size(CLs));
+
+for k = 1:n
+    CL = CLs(k);
+    V = sqrt((2 * mass_kg * g) / (rho * ADP.WingArea * CL));
+    CD = aeroCD(ADP, CL, V, alt_m);
+
+    Vs(k) = V;
+    Machs(k) = V / a;
+    CDs(k) = CD;
+    LDs(k) = CL / CD;
+end
 end

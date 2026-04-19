@@ -9,14 +9,14 @@ ADP = B777.ADP();
 ADP.TLAR = cast.TLAR.B777F();   % top level aircraft requirements
 
 %% ------------------------- Hyper-parameters ----------------------------
-ADP.TLAR.M_c = 0.84;
+ADP.TLAR.M_c = 0.80;
 ADP.Fleet_size = 7;
 ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size; %NOT A HYPERPARAMTEER
 
-ADP.AR = 9.5;
+ADP.AR = 9.8;
 ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
 
-ADP.cruise_altitude = 12000;
+ADP.cruise_altitude = 11800;
 
 %% ---------------------- Geometric parameters ---------------------------
 ADP.KinkPos = 10;   % spanwise position of TE kink in wing planform

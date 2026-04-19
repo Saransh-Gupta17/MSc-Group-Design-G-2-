@@ -1,356 +1,369 @@
-%% ExampleSizing_TradeStudies
-% Runs trade studies using a baseline aircraft setup.
+%% TradeStudy_AR_FleetSize_DOC
+% Trade study on:
+%   1) Aspect Ratio
+%   2) Fleet Size
+%
+% Outputs:
+%   - summary table in workspace
+%   - CSV export
+%   - MAT file
+%   - plots for both per-aircraft and fleet DOC
 
 clear; clc; close all;
 
-%% ------------------------- Instantiate aircraft -------------------------
-ADP = B777.ADP();
-ADP.TLAR = cast.TLAR.B777F();
+%% ============================================================
+%% 1) Baseline definition
+%% ============================================================
+base = struct();
 
-%% ------------------------- Hyper-parameters ----------------------------
-ADP.TLAR.M_c = 0.84;
-ADP.Fleet_size = 6;
+% ------------------------- Instantiate aircraft -------------------------
+base.ADP = B777.ADP();
+base.ADP.TLAR = cast.TLAR.B777F();
+
+% ------------------------- Baseline settings ---------------------------
+base.ADP.TLAR.M_c = 0.80;
+base.ADP.Fleet_size = 10;
+base.ADP.TLAR.Payload = base.ADP.Total_Payload / base.ADP.Fleet_size;
+
+base.ADP.AR = 9.8;
+base.ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
+base.ADP.cruise_altitude = 11800;
+
+% ---------------------- Geometric parameters ---------------------------
+base.KinkPos       = 10;
+base.WingLoading   = 7000;
+base.WingPosFrac   = 0.44;
+base.V_HT          = 0.75;
+base.V_VT          = 0.07;
+base.HtpPosFrac    = 0.85;
+base.VtpPosFrac    = 0.82;
+
+% ------------------------ Class-I estimates ----------------------------
+base.MTOM_factor   = 3.35;
+base.Mf_Fuel       = 0.19;
+base.Mf_res        = 0.03;
+base.Mf_Ldg        = 0.68;
+base.Mf_TOC        = 0.97;
+
+% -------------------------- Cost settings ------------------------------
+base.FuelType            = 'JetA1';
+base.NumLandings         = 1;
+base.NumCycles           = 1;
+base.NavChargePerFlight  = 0;
+base.UseImprovedMaint    = false;
+base.NumEngines          = 2;
+base.EngineCost          = 0;
+
+%% ============================================================
+%% 2) Wide trade-study ranges
+%% ============================================================
+AR_values    = [7.0 7.5 8.0 8.5 9.0 9.5 10.0 11.0 12.0 13.0 14.0];
+Fleet_values = [4 6 8 10 12 15 18 20];
+
+%% ============================================================
+%% 3) Run trade study
+%% ============================================================
+AllRows = [];
+
+fprintf('\n============================================================\n');
+fprintf('      TRADE STUDY: ASPECT RATIO AND FLEET SIZE vs DOC       \n');
+fprintf('============================================================\n');
+
+%% ---------------- Aspect ratio sweep ----------------
+fprintf('\n--- Sweeping Aspect Ratio ---\n');
+for i = 1:numel(AR_values)
+    val = AR_values(i);
+    fprintf('AR = %.2f ... ', val);
+
+    try
+        result = runCase(base, 'AR', val);
+        row = makeRow("AR", val, result);
+        AllRows = [AllRows; row]; %#ok<AGROW>
+        fprintf('OK\n');
+    catch ME
+        row = makeFailedRow("AR", val, ME.message, base.ADP.Fleet_size);
+        AllRows = [AllRows; row]; %#ok<AGROW>
+        fprintf('FAILED\n');
+    end
+end
+
+%% ---------------- Fleet size sweep ----------------
+fprintf('\n--- Sweeping Fleet Size ---\n');
+for i = 1:numel(Fleet_values)
+    val = Fleet_values(i);
+    fprintf('Fleet size = %d ... ', val);
+
+    try
+        result = runCase(base, 'Fleet_size', val);
+        row = makeRow("Fleet_size", val, result);
+        AllRows = [AllRows; row]; %#ok<AGROW>
+        fprintf('OK\n');
+    catch ME
+        row = makeFailedRow("Fleet_size", val, ME.message, val);
+        AllRows = [AllRows; row]; %#ok<AGROW>
+        fprintf('FAILED\n');
+    end
+end
+
+%% ============================================================
+%% 4) Split tables
+%% ============================================================
+AR_Table    = AllRows(AllRows.Parameter == "AR", :);
+Fleet_Table = AllRows(AllRows.Parameter == "Fleet_size", :);
+
+disp(' ');
+disp('Full trade study summary:');
+disp(AllRows);
+
+disp(' ');
+disp('Aspect ratio study:');
+disp(AR_Table);
+
+disp(' ');
+disp('Fleet size study:');
+disp(Fleet_Table);
+
+%% ============================================================
+%% 5) Plot results
+%% ============================================================
+
+% ---------- Fleet DOC vs AR ----------
+T = AR_Table(AR_Table.Success == true, :);
+if ~isempty(T)
+    figure('Name','Fleet DOC vs Aspect Ratio','Color','w');
+    plot(T.Value, T.DOC_annual_MUSD_fleet, '-o', 'LineWidth', 1.5);
+    xlabel('Aspect Ratio');
+    ylabel('Fleet DOC annual [M$/yr]');
+    title('Trade Study: Fleet DOC vs Aspect Ratio');
+    grid on;
+end
+
+% ---------- Fleet DOC vs Fleet Size ----------
+T = Fleet_Table(Fleet_Table.Success == true, :);
+if ~isempty(T)
+    figure('Name','Fleet DOC vs Fleet Size','Color','w');
+    plot(T.Value, T.DOC_annual_MUSD_fleet, '-o', 'LineWidth', 1.5);
+    xlabel('Fleet Size');
+    ylabel('Fleet DOC annual [M$/yr]');
+    title('Trade Study: Fleet DOC vs Fleet Size');
+    grid on;
+end
+
+% ---------- Per-aircraft DOC vs AR ----------
+T = AR_Table(AR_Table.Success == true, :);
+if ~isempty(T)
+    figure('Name','Per-Aircraft DOC vs Aspect Ratio','Color','w');
+    plot(T.Value, T.DOC_annual_MUSD_perAircraft, '-o', 'LineWidth', 1.5);
+    xlabel('Aspect Ratio');
+    ylabel('Per-aircraft DOC annual [M$/yr]');
+    title('Trade Study: Per-Aircraft DOC vs Aspect Ratio');
+    grid on;
+end
+
+% ---------- Per-aircraft DOC vs Fleet Size ----------
+T = Fleet_Table(Fleet_Table.Success == true, :);
+if ~isempty(T)
+    figure('Name','Per-Aircraft DOC vs Fleet Size','Color','w');
+    plot(T.Value, T.DOC_annual_MUSD_perAircraft, '-o', 'LineWidth', 1.5);
+    xlabel('Fleet Size');
+    ylabel('Per-aircraft DOC annual [M$/yr]');
+    title('Trade Study: Per-Aircraft DOC vs Fleet Size');
+    grid on;
+end
+
+%% ============================================================
+%% 6) Best results
+%% ============================================================
+goodRows = AllRows(AllRows.Success == true, :);
+
+if ~isempty(goodRows)
+    goodRowsFleet = sortrows(goodRows, 'DOC_annual_MUSD_fleet', 'ascend');
+    goodRowsAircraft = sortrows(goodRows, 'DOC_annual_MUSD_perAircraft', 'ascend');
+
+    fprintf('\n============================================================\n');
+    fprintf('              BEST CASES BY LOWEST FLEET DOC                \n');
+    fprintf('============================================================\n');
+    disp(goodRowsFleet(:, { ...
+        'Parameter','Value', ...
+        'DOC_annual_MUSD_fleet', ...
+        'DOC_annual_MUSD_perAircraft', ...
+        'DOC_trip_kUSD', ...
+        'MTOM_t','BlockFuel_t','BlockTime_hr','Span_m','Payload_t','Fleet_size'}));
+
+    fprintf('\n============================================================\n');
+    fprintf('          BEST CASES BY LOWEST PER-AIRCRAFT DOC             \n');
+    fprintf('============================================================\n');
+    disp(goodRowsAircraft(:, { ...
+        'Parameter','Value', ...
+        'DOC_annual_MUSD_perAircraft', ...
+        'DOC_annual_MUSD_fleet', ...
+        'DOC_trip_kUSD', ...
+        'MTOM_t','BlockFuel_t','BlockTime_hr','Span_m','Payload_t','Fleet_size'}));
+end
+
+%% ============================================================
+%% 7) Save outputs
+%% ============================================================
+save('TradeStudy_AR_FleetSize_DOC_results.mat', ...
+    'base', 'AR_values', 'Fleet_values', 'AllRows', 'AR_Table', 'Fleet_Table');
+
+writetable(AllRows, 'TradeStudy_AR_FleetSize_DOC_summary.csv');
+
+fprintf('\nSaved:\n');
+fprintf('  - TradeStudy_AR_FleetSize_DOC_results.mat\n');
+fprintf('  - TradeStudy_AR_FleetSize_DOC_summary.csv\n');
+
+%% ============================================================
+%% Local functions
+%% ============================================================
+
+function row = makeRow(paramName, value, result)
+row = table( ...
+    string(paramName), ...
+    value, ...
+    result.Success, ...
+    result.DOC_annual_MUSD_perAircraft, ...
+    result.DOC_annual_MUSD_fleet, ...
+    result.COC_annual_MUSD_perAircraft, ...
+    result.COC_annual_MUSD_fleet, ...
+    result.DOC_trip_kUSD, ...
+    result.COC_trip_kUSD, ...
+    result.MTOM_t, ...
+    result.BlockFuel_t, ...
+    result.BlockTime_hr, ...
+    result.Span_m, ...
+    result.Payload_t, ...
+    result.Fleet_size, ...
+    string(result.FailReason), ...
+    'VariableNames', { ...
+        'Parameter', 'Value', 'Success', ...
+        'DOC_annual_MUSD_perAircraft', ...
+        'DOC_annual_MUSD_fleet', ...
+        'COC_annual_MUSD_perAircraft', ...
+        'COC_annual_MUSD_fleet', ...
+        'DOC_trip_kUSD', ...
+        'COC_trip_kUSD', ...
+        'MTOM_t', 'BlockFuel_t', 'BlockTime_hr', ...
+        'Span_m', 'Payload_t', 'Fleet_size', 'FailReason'});
+end
+
+function row = makeFailedRow(paramName, value, failMsg, fleetSize)
+row = table( ...
+    string(paramName), ...
+    value, ...
+    false, ...
+    NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, fleetSize, ...
+    string(failMsg), ...
+    'VariableNames', { ...
+        'Parameter', 'Value', 'Success', ...
+        'DOC_annual_MUSD_perAircraft', ...
+        'DOC_annual_MUSD_fleet', ...
+        'COC_annual_MUSD_perAircraft', ...
+        'COC_annual_MUSD_fleet', ...
+        'DOC_trip_kUSD', ...
+        'COC_trip_kUSD', ...
+        'MTOM_t', 'BlockFuel_t', 'BlockTime_hr', ...
+        'Span_m', 'Payload_t', 'Fleet_size', 'FailReason'});
+end
+
+function result = runCase(base, paramName, paramValue)
+
+ADP = base.ADP;
+
+% Keep payload linked to fleet size
 ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size;
 
-ADP.AR = 9.5;
-ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
-ADP.WingLoading = (347815*9.81)/(473.3*cosd(31.6));
-ADP.cruise_altitude = 12000;
+% Apply study variable
+switch paramName
+    case 'AR'
+        ADP.AR = paramValue;
 
-%% ---------------------- Geometric parameters ---------------------------
-ADP.KinkPos = 10;
+    case 'Fleet_size'
+        ADP.Fleet_size = paramValue;
+        ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size;
 
+    otherwise
+        error('Unknown study parameter: %s', paramName);
+end
+
+% Fuselage sizing
 [ADP.CabinLength, ADP.CabinRadius, ADP.L_total] = ...
     B777.geom.fuselage_sizer(ADP.Fleet_size, ADP.Pallet_size, ...
                              ADP.CockpitLength, ADP.D_max);
 
-ADP.WingPos = 0.44 * ADP.L_total;
-ADP.V_HT    = 0.75;
-ADP.V_VT    = 0.07;
-ADP.HtpPos  = 0.85 * ADP.L_total;
-ADP.VtpPos  = 0.82 * ADP.L_total;
+% Geometry positions
+ADP.KinkPos     = base.KinkPos;
+ADP.WingLoading = base.WingLoading;
+ADP.WingPos     = base.WingPosFrac * ADP.L_total;
+ADP.V_HT        = base.V_HT;
+ADP.V_VT        = base.V_VT;
+ADP.HtpPos      = base.HtpPosFrac * ADP.L_total;
+ADP.VtpPos      = base.VtpPosFrac * ADP.L_total;
 
-%% ------------------------ Class-I estimates ----------------------------
-ADP.MTOM    = 3.35 * ADP.TLAR.Payload;
-ADP.Mf_Fuel = 0.19;
-ADP.Mf_res  = 0.03;
-ADP.Mf_Ldg  = 0.68;
-ADP.Mf_TOC  = 0.97;
+% Class-I estimates
+ADP.MTOM    = base.MTOM_factor * ADP.TLAR.Payload;
+ADP.Mf_Fuel = base.Mf_Fuel;
+ADP.Mf_res  = base.Mf_res;
+ADP.Mf_Ldg  = base.Mf_Ldg;
+ADP.Mf_TOC  = base.Mf_TOC;
 
-%% ------------------------- Baseline sizing -----------------------------
+% Sizing
 ADP = B777.Size(ADP);
 
-% Save a clean baseline
-ADP0 = ADP;
+% Build geometry
+[B7Geom, B7Mass] = B777.BuildGeometry(ADP); %#ok<NASGU>
+d = B7Mass.GetData; %#ok<NASGU>
 
-%% ==============================================================
-%% Trade Study 1: MTOM and Block Fuel vs Wing Span
-%% ==============================================================
-Spans = 50:5:100;
+% Mission analysis
+[BlockFuel, ~, ~, ~, BlockTime_hr] = ...
+    B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
 
-mtoms = zeros(size(Spans));
-fuels = zeros(size(Spans));
+% Economics
+FlightsPerYear      = ADP.TLAR.FlightsPerYear;
+AnnualUtilisationHr = ADP.TLAR.FlightHours;
 
-for i = 1:length(Spans)
-    ADPi = ADP0;
-    ADPi.Span = Spans(i);
-    ADPi = B777.Size(ADPi);
+HullValue_guess = 44880 * ADP.MTOM^0.65;
+TotalInvestment = HullValue_guess;
 
-    mtoms(i) = ADPi.MTOM;
-    fuels(i) = ADPi.Mf_Fuel * ADPi.MTOM;
+Econ = B777.Economics( ...
+    ADP.MTOM, ...
+    ADP.Span, ...
+    BlockFuel, ...
+    BlockTime_hr, ...
+    base.FuelType, ...
+    base.NumLandings, ...
+    base.NumCycles, ...
+    AnnualUtilisationHr, ...
+    FlightsPerYear, ...
+    TotalInvestment, ...
+    'ParkingDaysPerYear', ADP.TLAR.ParkingDays, ...
+    'NavChargePerFlight', base.NavChargePerFlight, ...
+    'UseImprovedMaint', base.UseImprovedMaint, ...
+    'NumEngines', base.NumEngines, ...
+    'EngineCost', base.EngineCost);
+
+% Fleet totals
+Fleet_DOC_annual = ADP.Fleet_size * Econ.DOC_annual;
+Fleet_COC_annual = ADP.Fleet_size * Econ.COC_annual;
+
+% Return results
+result = struct();
+result.Success                    = true;
+result.FailReason                 = "";
+
+result.DOC_annual_MUSD_perAircraft = Econ.DOC_annual / 1e6;
+result.DOC_annual_MUSD_fleet       = Fleet_DOC_annual / 1e6;
+
+result.COC_annual_MUSD_perAircraft = Econ.COC_annual / 1e6;
+result.COC_annual_MUSD_fleet       = Fleet_COC_annual / 1e6;
+
+result.DOC_trip_kUSD              = Econ.DOC_trip / 1e3;
+result.COC_trip_kUSD              = Econ.COC_trip / 1e3;
+
+result.MTOM_t                     = ADP.MTOM / 1e3;
+result.BlockFuel_t                = BlockFuel / 1e3;
+result.BlockTime_hr               = BlockTime_hr;
+result.Span_m                     = ADP.Span;
+result.Payload_t                  = ADP.TLAR.Payload / 1e3;
+result.Fleet_size                 = ADP.Fleet_size;
 end
-
-figure(1); clf;
-tt = tiledlayout(2,1);
-
-nexttile;
-plot(Spans, mtoms/1e3, '-s', 'LineWidth', 1.5)
-xlabel('Span [m]')
-ylabel('MTOM [t]')
-title('MTOM vs Wing Span')
-grid on
-
-nexttile;
-plot(Spans, fuels/1e3, '-o', 'LineWidth', 1.5)
-xlabel('Span [m]')
-ylabel('Fuel Mass [t]')
-title('Fuel Mass vs Wing Span')
-grid on
-
-%% ==============================================================
-%% Trade Study 2: MTOM and Block Fuel vs Fleet Size
-%% ==============================================================
-FleetSizes = 6:1:14;
-
-mtoms_fleet = zeros(size(FleetSizes));
-blockfuel_per_aircraft = zeros(size(FleetSizes));
-total_blockfuel_fleet = zeros(size(FleetSizes));
-
-for i = 1:length(FleetSizes)
-    ADPi = ADP0;
-
-    ADPi.Fleet_size = FleetSizes(i);
-    ADPi.TLAR.Payload = ADPi.Total_Payload / ADPi.Fleet_size;
-
-    [ADPi.CabinLength, ADPi.CabinRadius, ADPi.L_total] = ...
-        B777.geom.fuselage_sizer(ADPi.Fleet_size, ADPi.Pallet_size, ...
-                                 ADPi.CockpitLength, ADPi.D_max);
-
-    ADPi.WingPos = 0.44 * ADPi.L_total;
-    ADPi.HtpPos  = 0.85 * ADPi.L_total;
-    ADPi.VtpPos  = 0.82 * ADPi.L_total;
-
-    ADPi = B777.Size(ADPi);
-
-    [BlockFuel, ~, ~, ~, ~] = B777.MissionAnalysis(ADPi, ADPi.TLAR.Range, ADPi.MTOM);
-
-    mtoms_fleet(i) = ADPi.MTOM;
-    blockfuel_per_aircraft(i) = BlockFuel;
-    total_blockfuel_fleet(i) = ADPi.Fleet_size * BlockFuel;
-end
-
-figure(2); clf;
-tt = tiledlayout(3,1);
-
-nexttile;
-plot(FleetSizes, mtoms_fleet/1e3, '-s', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('MTOM per Aircraft [t]')
-title('MTOM per Aircraft vs Fleet Size')
-grid on
-
-nexttile;
-plot(FleetSizes, blockfuel_per_aircraft/1e3, '-o', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('Block Fuel per Aircraft [t]')
-title('Block Fuel per Aircraft vs Fleet Size')
-grid on
-
-nexttile;
-plot(FleetSizes, total_blockfuel_fleet/1e3, '-d', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('Total Fleet Block Fuel [t]')
-title('Total Fleet Block Fuel vs Fleet Size')
-grid on
-
-%% ==============================================================
-%% Trade Study 3: Entire Fleet Annual DOC vs Fleet Size
-%% ==============================================================
-FleetSizes = 5:1:12;
-
-FlightHours    = ADP0.TLAR.FlightHours;
-ParkingDays    = ADP0.TLAR.ParkingDays;
-FlightsPerYear = ADP0.TLAR.FlightsPerYear;
-FuelType       = 'JetA1';
-
-fleet_crew_cost      = zeros(size(FleetSizes));
-fleet_landing_cost   = zeros(size(FleetSizes));
-fleet_parking_cost   = zeros(size(FleetSizes));
-fleet_fuel_cost      = zeros(size(FleetSizes));
-fleet_hull_value     = zeros(size(FleetSizes));
-fleet_maint_fixed    = zeros(size(FleetSizes));
-fleet_maint_var      = zeros(size(FleetSizes));
-fleet_insurance_cost = zeros(size(FleetSizes));
-fleet_total_cost     = zeros(size(FleetSizes));
-
-for i = 1:length(FleetSizes)
-    ADPi = ADP0;
-
-    ADPi.Fleet_size = FleetSizes(i);
-    ADPi.TLAR.Payload = ADPi.Total_Payload / ADPi.Fleet_size;
-
-    [ADPi.CabinLength, ADPi.CabinRadius, ADPi.L_total] = ...
-        B777.geom.fuselage_sizer(ADPi.Fleet_size, ADPi.Pallet_size, ...
-                                 ADPi.CockpitLength, ADPi.D_max);
-
-    ADPi.WingPos = 0.44 * ADPi.L_total;
-    ADPi.HtpPos  = 0.85 * ADPi.L_total;
-    ADPi.VtpPos  = 0.82 * ADPi.L_total;
-
-    ADPi = B777.Size(ADPi);
-
-    [BlockFuel, ~, ~, ~, ~] = B777.MissionAnalysis(ADPi, ADPi.TLAR.Range, ADPi.MTOM);
-
-    [CrewCost, LandingFee, ParkingFee, FuelCost, HullValue, ...
-        MaintFixed, MaintVar, InsuranceCost, ~] = ...
-        B777.Economics(ADPi.MTOM, ADPi.Span, BlockFuel, ...
-                       FlightHours, ParkingDays, FuelType);
-
-    fleet_crew_cost(i)      = ADPi.Fleet_size * CrewCost;
-    fleet_landing_cost(i)   = ADPi.Fleet_size * LandingFee * FlightsPerYear;
-    fleet_parking_cost(i)   = ADPi.Fleet_size * ParkingFee;
-    fleet_fuel_cost(i)      = ADPi.Fleet_size * FuelCost * FlightsPerYear;
-    fleet_hull_value(i)     = ADPi.Fleet_size * HullValue;
-    fleet_maint_fixed(i)    = ADPi.Fleet_size * MaintFixed;
-    fleet_maint_var(i)      = ADPi.Fleet_size * MaintVar;
-    fleet_insurance_cost(i) = ADPi.Fleet_size * InsuranceCost;
-
-    fleet_total_cost(i) = fleet_crew_cost(i) + fleet_landing_cost(i) + ...
-                          fleet_parking_cost(i) + fleet_fuel_cost(i) + ...
-                          fleet_maint_fixed(i) + fleet_maint_var(i) + ...
-                          fleet_insurance_cost(i);
-end
-
-figure(3); clf;
-tt = tiledlayout(4,2);
-
-nexttile;
-plot(FleetSizes, fleet_crew_cost/1e6, '-o', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('Crew Cost [$M/yr]')
-title('Entire Fleet Crew Cost')
-grid on
-
-nexttile;
-plot(FleetSizes, fleet_landing_cost/1e6, '-o', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('Landing Fees [$M/yr]')
-title('Entire Fleet Landing Fees')
-grid on
-
-nexttile;
-plot(FleetSizes, fleet_parking_cost/1e6, '-o', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('Parking Fees [$M/yr]')
-title('Entire Fleet Parking Fees')
-grid on
-
-nexttile;
-plot(FleetSizes, fleet_fuel_cost/1e6, '-o', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('Fuel Cost [$M/yr]')
-title('Entire Fleet Fuel Cost')
-grid on
-
-nexttile;
-plot(FleetSizes, fleet_hull_value/1e6, '-o', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('Hull Value [$M]')
-title('Entire Fleet Hull Value')
-grid on
-
-nexttile;
-plot(FleetSizes, fleet_maint_fixed/1e6, '-o', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('Fixed Maintenance [$M/yr]')
-title('Entire Fleet Fixed Maintenance')
-grid on
-
-nexttile;
-plot(FleetSizes, fleet_maint_var/1e6, '-o', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('Variable Maintenance [$M/yr]')
-title('Entire Fleet Variable Maintenance')
-grid on
-
-nexttile;
-plot(FleetSizes, fleet_insurance_cost/1e6, '-o', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('Insurance Cost [$M/yr]')
-title('Entire Fleet Insurance')
-grid on
-
-figure(4); clf;
-plot(FleetSizes, fleet_total_cost/1e6, '-s', 'LineWidth', 1.5)
-xlabel('Fleet Size')
-ylabel('Total Fleet DOC [$M/yr]')
-title('Entire Fleet Total Direct Operating Cost')
-grid on
-
-%% ==============================================================
-%% Trade Study 4: Aspect Ratio vs Fleet DOC / Fuel / MTOM
-%% ==============================================================
-AspectRatios = 7:0.5:12;
-
-fleet_DOC_AR  = zeros(size(AspectRatios));
-fleet_fuel_AR = zeros(size(AspectRatios));
-fleet_MTO_AR  = zeros(size(AspectRatios));
-
-for i = 1:length(AspectRatios)
-    ADPi = ADP0;
-    ADPi.AR = AspectRatios(i);
-
-    ADPi = B777.Size(ADPi);
-
-    [BlockFuel, ~, ~, ~, ~] = B777.MissionAnalysis(ADPi, ADPi.TLAR.Range, ADPi.MTOM);
-
-    [CrewCost, LandingFee, ParkingFee, FuelCost, HullValue, ...
-        MaintFixed, MaintVar, InsuranceCost, ~] = ...
-        B777.Economics(ADPi.MTOM, ADPi.Span, BlockFuel, ...
-                       ADPi.TLAR.FlightHours, ADPi.TLAR.ParkingDays, 'JetA1');
-
-    fleet_total_cost_i = ADPi.Fleet_size * ( ...
-        CrewCost + ParkingFee + MaintFixed + MaintVar + InsuranceCost + ...
-        LandingFee * ADPi.TLAR.FlightsPerYear + ...
-        FuelCost * ADPi.TLAR.FlightsPerYear );
-
-    fleet_DOC_AR(i)  = fleet_total_cost_i;
-    fleet_fuel_AR(i) = BlockFuel * ADPi.Fleet_size;
-    fleet_MTO_AR(i)  = ADPi.MTOM;
-end
-
-figure(5); clf;
-tt = tiledlayout(3,1);
-
-nexttile;
-plot(AspectRatios, fleet_DOC_AR/1e6, '-o', 'LineWidth', 1.5)
-xlabel('Aspect Ratio')
-ylabel('Fleet DOC [$M/yr]')
-title('Aspect Ratio vs Direct Operating Cost')
-grid on
-
-nexttile;
-plot(AspectRatios, fleet_fuel_AR/1e3, '-o', 'LineWidth', 1.5)
-xlabel('Aspect Ratio')
-ylabel('Fleet Block Fuel [t]')
-title('Aspect Ratio vs Fuel Burn')
-grid on
-
-nexttile;
-plot(AspectRatios, fleet_MTO_AR/1e3, '-o', 'LineWidth', 1.5)
-xlabel('Aspect Ratio')
-ylabel('MTOM [t]')
-title('Aspect Ratio vs MTOM')
-grid on
-
-%% ==============================================================
-%% Trade Study 5: MTOM vs Wing Loading
-%% ==============================================================
-WingLoadings = 7000:250:9000;   % [N/m^2]
-
-mtoms_ws = zeros(size(WingLoadings));
-final_ws = zeros(size(WingLoadings));
-
-for i = 1:length(WingLoadings)
-    ADPi = ADP0;
-
-    % Set the trial wing loading
-    ADPi.WingLoading = WingLoadings(i);
-
-    % Optional: keep T/W fixed at baseline initial guess
-    % ADPi.ThrustToWeightRatio = ADP0.ThrustToWeightRatio;
-
-    % Re-size aircraft
-    ADPi = B777.Size(ADPi);
-
-    % Store outputs
-    mtoms_ws(i) = ADPi.MTOM;
-    final_ws(i) = ADPi.WingLoading;
-end
-
-figure(6); clf;
-tt = tiledlayout(2,1);
-
-nexttile;
-plot(WingLoadings, mtoms_ws/1e3, '-o', 'LineWidth', 1.5)
-xlabel('Input Wing Loading [N/m^2]')
-ylabel('MTOM [t]')
-title('MTOM vs Input Wing Loading')
-grid on
-
-nexttile;
-plot(WingLoadings, final_ws, '-s', 'LineWidth', 1.5)
-xlabel('Input Wing Loading [N/m^2]')
-ylabel('Final Converged Wing Loading [N/m^2]')
-title('Final Wing Loading vs Input Wing Loading')
-grid on
