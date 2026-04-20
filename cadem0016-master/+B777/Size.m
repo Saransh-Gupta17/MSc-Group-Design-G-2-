@@ -1,35 +1,80 @@
 function [ADP,out] = Size(ADP)
-% interatively build the model, run mission analysis and estimate required
-%  MTOM untill covnergence
+
 delta = inf;
-while delta>1
-    % constraint Analysis
-    B777.ConstraintAnalysis(ADP);
-    
-    % build geometry
-    [~,B7Mass] = B777.BuildGeometry(ADP);
-    
-    % update Aero
+
+B777.ConstraintAnalysis(ADP);
+
+while delta > 1
+
+    %% 1. ENGINE MODEL 
+    engine = cast.eng.TurboFan.GE90(1,ADP.cruise_altitude,ADP.TLAR.M_c);
+
+    if ADP.isSizeEng
+        engine = engine.Rubberise(ADP.Thrust);
+    end
+
+    ADP.Engine = engine;
+    ADP.EngineLocation = 0.4 * ADP.Span/2;
+
+    %% 2. Build geometry
+    [~, B7Mass] = B777.BuildGeometry(ADP);
+
+    %% 3. Update aero
     B777.UpdateAero(ADP);
-    
-    % mission Analysis
-    [BlockFuel,TripFuel,ResFuel,Mf_TOC,MissionTime] = B777.MissionAnalysis(ADP,ADP.TLAR.Range, ADP.MTOM);
-    
-    % calc OEM
-    idx = contains([B7Mass.Name],"Fuel","IgnoreCase",true) | contains([B7Mass.Name],"Payload","IgnoreCase",true);
+
+    %% 4. Mission analysis
+    [BlockFuel, TripFuel, ResFuel, Mf_TOC, MissionTime, Mission, CriticalTW, CriticalWS] = ...
+    B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
+
+    %% 5. Update T/W
+    ADP.ThrustToWeightRatio = CriticalTW.Value;
+
+    %% 6. Constraint analysis
+    B777.ConstraintAnalysis(ADP);
+
+    %% 7. OEM
+    idx = contains([B7Mass.Name],"Fuel","IgnoreCase",true) | ...
+          contains([B7Mass.Name],"Payload","IgnoreCase",true);
     ADP.OEM = sum([B7Mass(~idx).m]);
-    % estimate MTOM
-    mtom = sum([B7Mass(1:end-2).m])+ADP.TLAR.Payload+BlockFuel;
+
+    %% 8. MTOM update
+    mtom = sum([B7Mass(1:end-2).m]) + ADP.TLAR.Payload + BlockFuel;
+
     delta = abs(ADP.MTOM - mtom);
     ADP.MTOM = mtom;
-    ADP.Mf_Fuel = BlockFuel /ADP.MTOM;
-    ADP.Mf_TOC = Mf_TOC;
-    ADP.Mf_Ldg = (ADP.MTOM-TripFuel)/ADP.MTOM;
-    ADP.Mf_res = ResFuel/ADP.MTOM;
-    %estimate outut parameters
-    out = struct();
-    out.BlockFuel = BlockFuel;
-    out.DOC = BlockFuel*1;
-    out.ATR = BlockFuel;
+
 end
+% Store useful outputs
+out.BlockFuel   = BlockFuel;
+out.TripFuel    = TripFuel;
+out.ResFuel     = ResFuel;
+out.Mf_TOC      = Mf_TOC;
+out.MissionTime = MissionTime;
+out.Mission     = Mission;
+out.CriticalTW  = CriticalTW;
+out.CriticalWS  = CriticalWS;
+
+% Display once after convergence
+fprintf('\n===== Cruise Sizing Study =====\n');
+fprintf('Begin cruise TW          = %.4f\n', Mission.CruiseStudy.BeginCruise.TW);
+fprintf('Begin cruise WS          = %.1f N/m^2\n', Mission.CruiseStudy.BeginCruise.WS);
+fprintf('Begin cruise L/D         = %.2f\n', Mission.CruiseStudy.BeginCruise.LD);
+
+fprintf('\nCruise-climb requirement = 300 ft/min at cruise Mach\n');
+fprintf('Cruise-climb TW          = %.4f\n', Mission.CruiseStudy.CruiseClimbRequirement.TW);
+fprintf('Cruise-climb WS          = %.1f N/m^2\n', Mission.CruiseStudy.CruiseClimbRequirement.WS);
+fprintf('Cruise-climb altitude    = %.1f m\n', Mission.CruiseStudy.CruiseClimbRequirement.Altitude);
+fprintf('Cruise-climb Mach        = %.3f\n', Mission.CruiseStudy.CruiseClimbRequirement.Mach);
+
+fprintf('\n===== Critical Sizing Cases =====\n');
+fprintf('Critical T/W     = %.4f\n', CriticalTW.Value);
+fprintf('Critical T/W seg = %s\n', CriticalTW.Segment);
+fprintf('Critical T/W alt = %.1f m\n', CriticalTW.Altitude_m);
+fprintf('Critical T/W M   = %.3f\n', CriticalTW.Mach);
+
+fprintf('\nCritical W/S     = %.1f N/m^2\n', CriticalWS.Value);
+fprintf('Critical W/S seg = %s\n', CriticalWS.Segment);
+fprintf('Critical W/S alt = %.1f m\n', CriticalWS.Altitude_m);
+fprintf('Critical W/S M   = %.3f\n', CriticalWS.Mach);
+
 end

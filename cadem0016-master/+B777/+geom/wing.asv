@@ -69,16 +69,16 @@ knockdown_interact = 0.90;
 
 sigma_allow = sigma_y / SF * knockdown_local * knockdown_interact;
 
-%STEP 3: GET ENGINE MASS FROM ADP (Still not working)
+%             STEP 3: GET ENGINE MASS FROM ADP (Still not working)
+
+engine_mass = 9300; % kg (one engine)
+
+% Engine position: standard at 40% of half-span (pylon location)
+% This is typical for transport aircraft
+engine_pos = 0.4 * span/2;
 
 
-engine_mass = obj.Engine.Mass;
-
-%Engine position from ADP
-engine_pos = obj.EngineLocation;
-
-
-%STEP 4: LOAD CASES (Standard values from the finton documentation)
+%             STEP 4: LOAD CASES (Standard values from the finton documentation)
 
 
 % Standard load cases for transport aircraft (CS-25 / CS-23)
@@ -92,15 +92,8 @@ g = 9.81;
 MTOM = obj.MTOM;
 
 % Structural sizing iteration
-c_root = 2 * obj.WingArea / (span * (1 + tr));
 N = 400;
 y = linspace(0, span/2, N);
-
-% ---- SPANWISE CHORD VARIATION ----
-c_span = c_root * sqrt(1 - (2*y/span).^2);
-
-% Prevent chord going to zero at tip (numerical stability)
-c_span = max(c_span, 0.2 * c_root);
 
 wing_mass = 0.12 * MTOM;
 tol = 0.01;
@@ -169,20 +162,20 @@ for iter = 1:iter_max
     
     %% ---- STRUCTURAL SIZING ----
     
+    c_root = 2 * obj.WingArea / (span * (1 + tr));
     
-    
-    box_height_span   = 0.12 * c_span;
-    flange_width_span = 0.40 * c_span;
+    box_height   = 0.12 * c_root;
+    flange_width = 0.40 * c_root;
     
     Z_req = M_design / sigma_allow;
     
-    A_skin_root = Z_req / (0.12 * c_root);
-    t_root = A_skin_root / (2 * (0.40 * c_root));
+    A_skin_root = Z_req / box_height;
+    t_root = A_skin_root / (2 * flange_width);
     
     t_span = t_root * sqrt(1 - (2*y/span).^2);
     t_span = max(t_span, 1e-4);   % prevent zero thickness
     
-    skin_volume = 2 * trapz(y, flange_width_span .* t_span);
+    skin_volume = 2 * trapz(y, flange_width .* t_span);
     
     %% ---- SPAR ----
     
@@ -190,14 +183,13 @@ for iter = 1:iter_max
     t_spar_tip  = 0.005 * c_root;
     
     t_spar_span = linspace(t_spar_root, t_spar_tip, N);
-    spar_volume = 2 * trapz(y, box_height_span .* t_spar_span);
-    
+    spar_volume = 2 * trapz(y, box_height .* t_spar_span);
     
     %% ---- RIBS (Buckling-based) ----
     
     k = 4;
     
-    Z_span = (box_height_span.^2 .* flange_width_span .* t_span) / 2;
+    Z_span = (box_height.^2 .* flange_width .* t_span) / 2;
     Z_span = max(Z_span, 1e-6);   % prevent divide-by-zero
     
     stress_span = M ./ Z_span;
@@ -211,40 +203,17 @@ for iter = 1:iter_max
     % numerical safety
     stress_span(stress_span <= 1e3) = 1e3;
     
-    rib_spacing_span = 0.52 * sqrt((pi^2 * E .* t_span.^2) ./ (k .* stress_span));
-
-    % realistic bounds
-    rib_spacing_span = min(rib_spacing_span, 1.3);
-    rib_spacing_span = max(rib_spacing_span, 0.30);
+    rib_spacing_span = sqrt((pi^2 * E .* t_span.^2) ./ (k .* stress_span));
+    rib_spacing_span = max(min(rib_spacing_span, 1.0), 0.3);
     
     n_ribs_half = trapz(y, 1 ./ rib_spacing_span);
     n_ribs = 2 * n_ribs_half;
     
-    rib_area_span = flange_width_span .* box_height_span;
+    rib_area_span = flange_width .* box_height .* sqrt(1 - (2*y/span).^2);
     rib_thickness_span = 0.002 * sqrt(stress_span / max(stress_span));
     rib_thickness_span = max(rib_thickness_span, 0.0015);  % minimum thickness
     
     rib_volume = 2 * trapz(y, rib_area_span .* rib_thickness_span ./ rib_spacing_span);
-
-    %% ---- FUEL TANK CHECK ----
-
-    fuel_density = 800; % kg/m^3 (Jet-A1 assumption)
-
-    % Assume tank occupies ~60% of wingbox width
-    tank_width_span = 0.6 * flange_width_span;
-
-    % Tank volume (integrated along span)
-    tank_volume = 2 * trapz(y, tank_width_span .* box_height_span);
-
-    % Required fuel volume
-    fuel_volume_required = fuel_mass_in_wing / fuel_density;
-
-    % Margin
-    fuel_volume_margin = (tank_volume / fuel_volume_required) - 1;
-
-    if fuel_volume_margin < 0
-        warning('Fuel tank volume insufficient!');
-    end
     
     %% ---- TOTAL ----
     
@@ -271,17 +240,8 @@ V_final = V;
 M_final = M;
 
 % Flexural rigidity (EI)
-Z_span = (box_height_span.^2 .* flange_width_span .* t_span) / 2;
+Z_span = (box_height.^2 .* flange_width .* t_span) / 2;
 EI_span = E .* Z_span;
-
-% ---- TORSIONAL STIFFNESS (GJ) ----
-
-J_span = (2/3) * flange_width_span .* (box_height_span.^3);
-
-GJ_span = G .* J_span;
-
-% Store in ADP for plotting
-obj.Wing_GJ = GJ_span;
 
 
 %MARGIN CHECKS
@@ -289,25 +249,16 @@ obj.Wing_GJ = GJ_span;
 stress_design = M_design / Z_req;
 margin_static = (sigma_allow / stress_design) - 1;
 
-% ---- CONSISTENT BUCKLING CHECK ----
+% Buckling check
+I_spar = (box_height^3 * flange_width) / 12;
+L_eff = 0.7 * span/2;
+sigma_crit = (pi^2 * E) / (L_eff / sqrt(box_height))^2;
+sigma_crit = sigma_crit * 0.85;
 
-sigma_crit_span = (k * pi^2 * E .* t_span.^2) ./ (rib_spacing_span.^2);
-
-margin_buckling_span = (sigma_crit_span ./ stress_span) - 1;
-
-margin_buckling = min(margin_buckling_span);
-
-%% ---- CLASS I WING MASS (EMPIRICAL FRACTION) ----
-
-wing_mass_fraction = 0.15;   % typical range: 0.12–0.18
-
-W_wing_classI = wing_mass_fraction * MTOM;
-
-mass_diff = (W_wing_classI / m_wing) - 1;
+margin_buckling = (sigma_crit / stress_design) - 1;
 
 
-
-%             OUTPUT FOR THE FINAL REPORT 
+%             DIAGNOSTIC OUTPUT FOR THE FINAL REPORT 
 
 
 fprintf('\n=== WING STRUCTURAL SIZING ===\n');
@@ -327,11 +278,6 @@ fprintf('  Design stress: %.1f MPa\n', stress_design/1e6);
 fprintf('  Allowable: %.1f MPa\n', sigma_allow/1e6);
 fprintf('  Static margin: %+.1f%%\n', 100*margin_static);
 fprintf('  Buckling margin: %+.1f%%\n', 100*margin_buckling);
-fprintf('  Fuel tank volume margin: %+.1f%%\n', 100*fuel_volume_margin);
-fprintf('\n=== CLASS I COMPARISON ===\n');
-fprintf('  Class I wing mass: %.1f kg\n', W_wing_classI);
-fprintf('  Class II.5 wing mass: %.1f kg\n', m_wing);
-fprintf('  Difference: %+.1f%%\n', 100*mass_diff);
 
 if margin_static < 0 || margin_buckling < 0
     warning('Wing margins are NEGATIVE!');
@@ -351,7 +297,6 @@ massObj = cast.MassObj( ...
 obj.Wing_V  = V_final;
 obj.Wing_M  = M_final;
 obj.Wing_EI = EI_span;
-obj.Wing_GJ = GJ_span;
 
 end
 
