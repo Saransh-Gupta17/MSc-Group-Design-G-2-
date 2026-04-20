@@ -540,24 +540,6 @@ Mission.CriticalWS = CriticalWS;
 %% ============================================================
 %% 20) Diagnostic plot
 %% ============================================================
-figure(11); clf;
-tiledlayout(2,1)
-
-nexttile
-plot(Mission.Cruise.StepCL, Mission.Cruise.StepLD, 'LineWidth', 1.5)
-hold on
-plot(Mission.Cruise.CL, Mission.Cruise.LD, 'ro', 'MarkerSize', 8, 'LineWidth', 1.5)
-xlabel('Lift Coefficient, C_L')
-ylabel('Lift-to-Drag Ratio, L/D')
-title('Stepped Cruise-Climb')
-grid on
-
-nexttile
-plot(Cls, LDs, 'LineWidth', 1.5)
-xlabel('Lift Coefficient, C_L')
-ylabel('Lift-to-Drag Ratio, L/D')
-title('Loiter Efficiency Sweep')
-grid on
 
 end
 
@@ -649,19 +631,19 @@ for i = 1:nSteps
     TimeTot = TimeTot + dt;
     RangeTot = RangeTot + dR;
 
-    Seg.StepFuel(i) = FuelStep;
-    Seg.StepMass(i) = m_current;
-    Seg.StepAlt(i)  = h_mid;
-    Seg.StepMach(i) = Mach;
-    Seg.StepCL(i)   = CL;
-    Seg.StepCD(i)   = CD;
-    Seg.StepDrag(i) = D;
-    Seg.StepTreq(i) = T_req;
-    Seg.StepTime(i) = dt;
-    Seg.StepV(i)    = V;
-    Seg.StepTW(i)   = TW_step;
-    Seg.StepWS(i)   = WS_step;
-    Seg.StepRange(i)= dR;
+    Seg.StepFuel(i)  = FuelStep;
+    Seg.StepMass(i)  = m_current;
+    Seg.StepAlt(i)   = h_mid;
+    Seg.StepMach(i)  = Mach;
+    Seg.StepCL(i)    = CL;
+    Seg.StepCD(i)    = CD;
+    Seg.StepDrag(i)  = D;
+    Seg.StepTreq(i)  = T_req;
+    Seg.StepTime(i)  = dt;
+    Seg.StepV(i)     = V;
+    Seg.StepTW(i)    = TW_step;
+    Seg.StepWS(i)    = WS_step;
+    Seg.StepRange(i) = dR;
 end
 
 Seg.Fuel = FuelTot;
