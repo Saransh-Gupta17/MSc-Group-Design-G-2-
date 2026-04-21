@@ -1,12 +1,9 @@
 %% ExampleSizing_Baseline
-% Sizes a single aircraft configuration, plots it, and prints a clean
-% summary of geometry, mass, aero and economics for the selected fleet case.
-
 clear; clc; close all;
 
 %% ------------------------- Instantiate aircraft -------------------------
 ADP = B777.ADP();
-ADP.TLAR = cast.TLAR.B777F();   % top level aircraft requirements
+ADP.TLAR = cast.TLAR.B777F();
 
 %% ------------------------- Hyper-parameters ----------------------------
 ADP.TLAR.M_c = 0.80;
@@ -21,22 +18,34 @@ ADP.cruise_altitude = 11800;
 %% ---------------------- Geometric parameters ---------------------------
 ADP.KinkPos = 10;   % spanwise position of TE kink in wing planform
 ADP.WingLoading = 7000;
+ADP.TLAR.M_c = 0.84;
+ADP.Fleet_size = 10;
+ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size;
+
+ADP.AR = 8.5;
+ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
+ADP.WingLoading = 9000;
+ADP.cruise_altitude = 12000;
+
+%% ---------------------- Geometric parameters ---------------------------
+ADP.KinkPos = 10;
+
 [ADP.CabinLength, ADP.CabinRadius, ADP.L_total] = ...
     B777.geom.fuselage_sizer(ADP.Fleet_size, ADP.Pallet_size, ...
                              ADP.CockpitLength, ADP.D_max);
 
-ADP.WingPos = 0.44 * ADP.L_total;   % wing position [m] from nose
-ADP.V_HT    = 0.75;                 % horizontal tail volume coefficient
-ADP.V_VT    = 0.07;                 % vertical tail volume coefficient
-ADP.HtpPos  = 0.85 * ADP.L_total;   % HTP position [m] from nose
-ADP.VtpPos  = 0.82 * ADP.L_total;   % VTP position [m] from nose
+ADP.WingPos = 0.50 * ADP.L_total;
+ADP.V_HT    = 1.3;
+ADP.V_VT    = 0.07;
+ADP.HtpPos  = 0.88 * ADP.L_total;
+ADP.VtpPos  = 0.88 * ADP.L_total;
 
 %% ------------------------ Class-I estimates ----------------------------
-ADP.MTOM    = 3.35 * ADP.TLAR.Payload;  % initial guess
-ADP.Mf_Fuel = 0.19;                     % max fuel mass fraction
-ADP.Mf_res  = 0.03;                     % reserve fuel mass fraction
-ADP.Mf_Ldg  = 0.68;                     % landing mass fraction
-ADP.Mf_TOC  = 0.97;                     % top-of-climb mass fraction
+ADP.MTOM    = 3.35 * ADP.TLAR.Payload;
+ADP.Mf_Fuel = 0.19;
+ADP.Mf_res  = 0.03;
+ADP.Mf_Ldg  = 0.68;
+ADP.Mf_TOC  = 0.97;
 
 %% ------------------------------ Sizing ---------------------------------
 ADP = B777.Size(ADP);
@@ -44,6 +53,115 @@ ADP = B777.Size(ADP);
 %% ------------------- Build geometry and masses -------------------------
 [B7Geom, B7Mass] = B777.BuildGeometry(ADP);
 d = B7Mass.GetData;
+
+%% =========================
+% EMPENNAGE
+%% =========================
+[GeomEmp, MassEmp] = B777.geom.empenage(ADP);
+
+B7Geom = [B7Geom GeomEmp];
+B7Mass = [B7Mass MassEmp];
+%% ------------------------ STABILITY ANALYSIS --------------------------
+cfg = struct();
+
+% Aerodynamics
+cfg.Cm0 = -0.05;
+cfg.eta_h = 0.9;
+cfg.CLh_max_elevator = -0.8;
+
+% Stability target
+cfg.StaticMargin_target = 0.08;
+
+% CG envelope assumptions
+cfg.PayloadFwdFrac = 0.2;
+cfg.PayloadAftFrac = 0.8;
+cfg.PayloadFracs   = [0.6 1.0];
+cfg.FuelFracs      = [0.3 0.6 1.0];
+
+% Atmosphere
+cfg.rho_cruise = 0.38;
+cfg.a_cruise   = 295;
+
+% Engine & control
+cfg.T_engine_TO = ADP.Thrust / 2;
+cfg.y_engine    = 0.25 * ADP.Span;
+
+% Speeds
+cfg.V_TO    = 80;
+cfg.V_cross = 20;
+
+% Side force model
+cfg.SideAreaFuse = 200;
+cfg.CY_cross     = 0.5;
+cfg.xcp_cross    = ADP.WingPos;
+cfg.CY_v_max_rud = 1.2;
+
+% Geometry from ADP
+cfg.Sref   = ADP.WingArea;
+cfg.Span   = ADP.Span;
+cfg.MAC    = ADP.c_ac;
+cfg.AR     = ADP.AR;
+
+cfg.WingPos = ADP.WingPos;
+cfg.HtpPos  = ADP.HtpPos;
+cfg.VtpPos  = ADP.VtpPos;
+
+cfg.VH = ADP.V_HT;
+cfg.VV = ADP.V_VT;
+
+cfg.CabinLength   = ADP.CabinLength;
+cfg.CockpitLength = ADP.CockpitLength;
+
+% Neutral point reference
+cfg.xLEMAC = ADP.WingPos - 0.25 * ADP.c_ac;
+
+%% ------------------ RUN STABILITY ------------------
+[AircraftStable, Summary, Weightbook, Results] = ...
+    B777.Stability(cfg, ADP, B7Geom, B7Mass);
+
+disp(Results)
+%% ------------------------- Mission analysis ----------------------------
+[BlockFuel, ~, ~, ~, ~] = B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);
+
+%% -------------------------- Cost analysis ------------------------------
+FuelType = 'JetA1';
+
+[CrewCost, LandingFee, ParkingFee, FuelCost, HullValue, ...
+    MaintFixed, MaintVar, InsuranceCost, TotalCost] = ...
+    B777.Economics(ADP.MTOM, ADP.Span, BlockFuel, ...
+                   ADP.TLAR.FlightHours, ADP.TLAR.ParkingDays, FuelType);
+
+FlightsPerYear = ADP.TLAR.FlightsPerYear;
+
+FleetCrewCost      = ADP.Fleet_size * CrewCost;
+FleetLandingCost   = ADP.Fleet_size * LandingFee * FlightsPerYear;
+FleetParkingCost   = ADP.Fleet_size * ParkingFee;
+FleetFuelCost      = ADP.Fleet_size * FuelCost * FlightsPerYear;
+FleetHullValue     = ADP.Fleet_size * HullValue;
+FleetMaintFixed    = ADP.Fleet_size * MaintFixed;
+FleetMaintVar      = ADP.Fleet_size * MaintVar;
+FleetInsuranceCost = ADP.Fleet_size * InsuranceCost;
+
+FleetTotalDOC = FleetCrewCost + FleetLandingCost + FleetParkingCost + ...
+                FleetFuelCost + FleetMaintFixed + FleetMaintVar + ...
+                FleetInsuranceCost;
+
+%% ----------------------------- Plotting --------------------------------
+f = figure(1);
+clf;
+
+img = imread('B777F_planform.png');
+imshow(img, 'XData', [0 63.7], 'YData', [-64.8 64.8]/2);
+hold on
+
+cast.draw(B7Geom, B7Mass)
+
+ax = gca;
+ax.XAxis.Visible = "on";
+ax.YAxis.Visible = "on";
+axis equal
+ylim([-0.5 0.5] * ADP.Span)
+title('Sized Aircraft Geometry')
 
 %% ------------------------- Mission analysis ----------------------------
 [BlockFuel, ~, ~, ~, BlockTime_hr,Mission] = B777.MissionAnalysis(ADP, ADP.TLAR.Range, ADP.MTOM);

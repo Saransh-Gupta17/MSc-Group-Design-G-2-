@@ -20,7 +20,10 @@ classdef MassObj
         function p = draw(obj)
             p = plot(obj.X(1),obj.X(2),'^w',MarkerEdgeColor='k');
             p.Annotation.LegendInformation.IconDisplayStyle = "off";
-            p.DataTipTemplate.DataTipRows(end+1) = dataTipTextRow("Name",obj.Name);
+            nameStr = string(obj.Name);
+            nameStr = nameStr(1); % ensure scalar
+
+            p.DataTipTemplate.DataTipRows(end+1) = dataTipTextRow("Name", @(~,~) char(string(obj.Name)));
             p.DataTipTemplate.DataTipRows(end+1) = dataTipTextRow("Mass",obj.m);
         end
 

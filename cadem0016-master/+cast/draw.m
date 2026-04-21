@@ -17,6 +17,6 @@ end
 CoM = sum([massObj.X].*[massObj.m],2)./sum([massObj.m]);
 p = plot(CoM(1),CoM(2),'wo',MarkerEdgeColor='k');
 p.Annotation.LegendInformation.IconDisplayStyle = "off";
-p.DataTipTemplate.DataTipRows(end+1) = dataTipTextRow("Name","CoM");
-p.DataTipTemplate.DataTipRows(end+1) = dataTipTextRow("Mass",string(sprintf('%.2f t',sum([massObj.m])/1e3)));
+p.DataTipTemplate.DataTipRows(end+1) = dataTipTextRow("Name", @(~,~) "CoM");
+p.DataTipTemplate.DataTipRows(end+1) = dataTipTextRow("Mass", @(~,~) sprintf('%.2f t', sum([massObj.m])/1e3));
 end

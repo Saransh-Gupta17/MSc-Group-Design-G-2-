@@ -70,12 +70,19 @@ classdef ADP < handle
         WingPos;    % Wing position along fuselage
         HtpPos;     % HTP pos along fuselage
         VtpPos;     % VTP pos along fuselage
+        Wing_y;
+        Wing_V;
+        Wing_M;
+        Wing_EI;
 
         Mstar = 0.935; % wing technology factor
 
         % Empenage Specific
         HtpArea;
         VtpArea;
+        ElevatorArea
+        RudderArea
+        AileronArea
     end
 
     % useful properties
