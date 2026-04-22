@@ -1,22 +1,32 @@
 %% ExampleSizing_Baseline
+% Sizes a single aircraft configuration, plots it, and prints a clean
+% summary of geometry, mass, aero and economics for the selected fleet case.
 clear; clc; close all;
+clear; clc; close all;
+
+% Store current graphics default
+oldFigVisible = get(0,'DefaultFigureVisible');
+
+% Hide all figures created anywhere during optimisation
+set(0,'DefaultFigureVisible','off');
+
+cleanupObj = onCleanup(@() set(0,'DefaultFigureVisible', oldFigVisible));
 
 %% ------------------------- Instantiate aircraft -------------------------
 ADP = B777.ADP();
 ADP.TLAR = cast.TLAR.B777F();
 
 %% ------------------------- Hyper-parameters ----------------------------
-ADP.TLAR.M_c = 0.80;
-ADP.Fleet_size = 7;
-ADP.TLAR.Payload = ADP.Total_Payload / ADP.Fleet_size; %NOT A HYPERPARAMTEER
 
-ADP.AR = 9.8;
-ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
-
+ADP.TLAR.Payload = 91000;
 ADP.cruise_altitude = 11800;
 
 %% ---------------------- Geometric parameters ---------------------------
 ADP.KinkPos = 10;   % spanwise position of TE kink in wing planform
+ADP.TLAR.M_c = 0.85;
+ADP.AR = 11;
+ADP.ThrustToWeightRatio = (513e3*2)/(347815*9.81);
+ADP.Fleet_size = ADP.Total_Payload/ADP.TLAR.Payload; %NOT A HYPERPARAMTEER
 ADP.WingLoading = 7000;
 ADP.TLAR.M_c = 0.84;
 ADP.Fleet_size = 10;
@@ -227,8 +237,9 @@ FleetTotalCOC = ADP.Fleet_size * Econ.COC_annual;
 cm     = cast.ClimateModel.fromMissionAnalysis(BlockFuel, ADP.TLAR.Range, BlockTime_hr,Mission);
 result = cm.computeImpact();
 atr    = cm.computeATR(result);
-cm.plotEmissions(result);
+%cm.plotEmissions(result);
 
+%
 %% ----------------------------- Plotting --------------------------------
 f = figure(1);
 clf;
@@ -496,7 +507,7 @@ elseif isfield(Mission.Total,'Time')
     fprintf('Total mission time        = %.2f hr\n', Mission.Total.Time/3600);
 end
 
-fprintf('========================================================================================================\n');
+fprintf('========================================================================================================\n'); 
 
     function printVerticalSegmentRow(name, seg)
         h1 = NaN;
@@ -703,3 +714,4 @@ end
 function M = estimateMachFromLoiter(~)
 M = NaN;
 end
+
